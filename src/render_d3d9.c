@@ -10,6 +10,8 @@
 
 HMODULE Direct3D9_hModule;
 
+typedef DWORD(WINAPI *poptb_renderer)(void);
+typedef void(__stdcall *poptb_callback)(void);
 static D3DPRESENT_PARAMETERS D3dpp;
 static LPDIRECT3D9 D3d;
 static LPDIRECT3DDEVICE9 D3dDev;
@@ -17,9 +19,51 @@ static LPDIRECT3DVERTEXBUFFER9 VertexBuf;
 static IDirect3DTexture9 *SurfaceTex[TEXTURE_COUNT];
 static IDirect3DTexture9 *PaletteTex[TEXTURE_COUNT];
 static IDirect3DPixelShader9 *PixelShader;
+extern poptb_callback poptb_callback_func = NULL;
+extern poptb_callback poptb_device_lost = NULL;
 static float ScaleW;
 static float ScaleH;
 static int BitsPerPixel;
+
+poptb_renderer getRenderFunc()
+{
+    return render_d3d9_main;
+}
+
+void setPoptbCallback(poptb_callback ptr)
+{
+    poptb_callback_func = ptr;
+}
+
+void setPoptbDeviceLost(poptb_callback ptr)
+{
+    poptb_device_lost = ptr;
+}
+
+D3DPRESENT_PARAMETERS* getD3dp()
+{
+    return &D3dpp;
+}
+
+LPDIRECT3D9* getD3d()
+{
+    return &D3d;
+}
+
+LPDIRECT3DDEVICE9* getD3dDev()
+{
+    return &D3dDev;
+}
+
+LPDIRECT3DVERTEXBUFFER9* getVertexBuf()
+{
+    return &VertexBuf;
+}
+
+IDirectDrawImpl** getDDraw()
+{
+    return &ddraw;
+}
 
 static BOOL CreateResources();
 static BOOL SetStates();
@@ -84,6 +128,9 @@ BOOL Direct3D9_OnDeviceLost()
 {
     if (D3dDev && IDirect3DDevice9_TestCooperativeLevel(D3dDev) == D3DERR_DEVICENOTRESET)
         return Direct3D9_Reset();
+
+    if (poptb_device_lost)
+        (*poptb_device_lost)();
 
     return FALSE;
 }
@@ -292,160 +339,165 @@ static void SetMaxFPS()
     }
 }
 
-DWORD WINAPI render_d3d9_main(void)
+static BOOL first_run = TRUE;
+static DWORD tickStart = 0;
+static DWORD tickEnd = 0;
+static BOOL needsUpdate = FALSE;
+
+DWORD WINAPI render_graphics(void)
 {
-    Sleep(500);
-
-    SetMaxFPS();
-
-    DWORD tickStart = 0;
-    DWORD tickEnd = 0;
-    BOOL needsUpdate = FALSE;
-
-    while (ddraw->render.run && WaitForSingleObject(ddraw->render.sem, 200) != WAIT_FAILED)
+    if (first_run == TRUE)
     {
-#if _DEBUG
-        DrawFrameInfoStart();
-#endif
-
-        static int texIndex = 0, palIndex = 0;
-
-        if (ddraw->fpsLimiter.ticklength > 0)
-            tickStart = timeGetTime();
-
-        EnterCriticalSection(&ddraw->cs);
-
-        if (ddraw->primary && (ddraw->bpp == 16 || (ddraw->primary->palette && ddraw->primary->palette->data_rgb)))
-        {
-            if (ddraw->vhack)
-            {
-                if (detect_cutscene())
-                {
-                    if (!InterlockedExchange(&ddraw->incutscene, TRUE))
-                        UpdateVertices(TRUE, TRUE);
-                }
-                else
-                {
-                    if (InterlockedExchange(&ddraw->incutscene, FALSE))
-                        UpdateVertices(FALSE, TRUE);
-                }
-            }
-
-            D3DLOCKED_RECT lock_rc;
-
-            if (InterlockedExchange(&ddraw->render.surfaceUpdated, FALSE))
-            {
-                if (++texIndex >= TEXTURE_COUNT)
-                    texIndex = 0;
-
-                RECT rc = { 0,0,ddraw->width,ddraw->height };
-
-                if (SUCCEEDED(IDirect3DDevice9_SetTexture(D3dDev, 0, (IDirect3DBaseTexture9 *)SurfaceTex[texIndex])) &&
-                    SUCCEEDED(IDirect3DTexture9_LockRect(SurfaceTex[texIndex], 0, &lock_rc, &rc, 0)))
-                {
-                    unsigned char *src = (unsigned char *)ddraw->primary->surface;
-                    unsigned char *dst = (unsigned char *)lock_rc.pBits;
-
-                    int i;
-                    for (i = 0; i < ddraw->height; i++)
-                    {
-                        memcpy(dst, src, ddraw->primary->lPitch);
-
-                        src += ddraw->primary->lPitch;
-                        dst += lock_rc.Pitch;
-                    }
-
-                    IDirect3DTexture9_UnlockRect(SurfaceTex[texIndex], 0);
-                }
-            }
-
-            if (ddraw->bpp == 8 && InterlockedExchange(&ddraw->render.paletteUpdated, FALSE))
-            {
-                if (++palIndex >= TEXTURE_COUNT)
-                    palIndex = 0;
-
-                RECT rc = { 0,0,256,1 };
-
-                if (SUCCEEDED(IDirect3DDevice9_SetTexture(D3dDev, 1, (IDirect3DBaseTexture9 *)PaletteTex[palIndex])) &&
-                    SUCCEEDED(IDirect3DTexture9_LockRect(PaletteTex[palIndex], 0, &lock_rc, &rc, 0)))
-                {
-                    memcpy(lock_rc.pBits, ddraw->primary->palette->data_rgb, 256 * sizeof(int));
-
-                    IDirect3DTexture9_UnlockRect(PaletteTex[palIndex], 0);
-                }
-            }
-
-            if (!ddraw->handlemouse)
-            {
-                ChildWindowExists = FALSE;
-                EnumChildWindows(ddraw->hWnd, EnumChildProc, (LPARAM)ddraw->primary);
-
-                if (ddraw->render.width != ddraw->width || ddraw->render.height != ddraw->height)
-                {
-                    if (ChildWindowExists)
-                    {
-                        IDirect3DDevice9_Clear(D3dDev, 0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
-
-                        if (!needsUpdate && UpdateVertices(FALSE, FALSE))
-                            needsUpdate = TRUE;
-                    }
-                    else if (needsUpdate)
-                    {
-                        if (UpdateVertices(FALSE, TRUE))
-                            needsUpdate = FALSE;
-                    }
-                }
-            }
-        }
-
-        LeaveCriticalSection(&ddraw->cs);
-
-        IDirect3DDevice9_BeginScene(D3dDev);
-        IDirect3DDevice9_DrawPrimitive(D3dDev, D3DPT_TRIANGLESTRIP, 0, 2);
-        IDirect3DDevice9_EndScene(D3dDev);
-
-        if (ddraw->bnetActive)
-            IDirect3DDevice9_Clear(D3dDev, 0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
-
-        if (FAILED(IDirect3DDevice9_Present(D3dDev, NULL, NULL, NULL, NULL)))
-        {
-            DWORD_PTR dwResult;
-            SendMessageTimeout(ddraw->hWnd, WM_D3D9DEVICELOST, 0, 0, 0, 1000, &dwResult);
-        }
+        SetMaxFPS();
+        first_run = FALSE;
+    }
 
 #if _DEBUG
-        DrawFrameInfoEnd();
+    DrawFrameInfoStart();
 #endif
-        
-        if (ddraw->fpsLimiter.ticklength > 0)
+
+    static int texIndex = 0, palIndex = 0;
+
+    if (ddraw->fpsLimiter.ticklength > 0)
+        tickStart = timeGetTime();
+
+    EnterCriticalSection(&ddraw->cs);
+
+    if (ddraw->primary && (ddraw->bpp == 16 || (ddraw->primary->palette && ddraw->primary->palette->data_rgb)))
+    {
+        if (ddraw->vhack)
         {
-            if (ddraw->fpsLimiter.hTimer)
+            if (detect_cutscene())
             {
-                if (ddraw->vsync)
-                {
-                    WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
-                    LARGE_INTEGER liDueTime = { .QuadPart = -ddraw->fpsLimiter.tickLengthNs };
-                    SetWaitableTimer(ddraw->fpsLimiter.hTimer, &liDueTime, 0, NULL, NULL, FALSE);
-                }
-                else
-                {
-                    FILETIME ft = { 0 };
-                    GetSystemTimeAsFileTime(&ft);
-
-                    if (CompareFileTime((FILETIME *)&ddraw->fpsLimiter.dueTime, &ft) == -1)
-                    {
-                        memcpy(&ddraw->fpsLimiter.dueTime, &ft, sizeof(LARGE_INTEGER));
-                    }
-                    else
-                    {
-                        WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
-                    }
-
-                    ddraw->fpsLimiter.dueTime.QuadPart += ddraw->fpsLimiter.tickLengthNs;
-                    SetWaitableTimer(ddraw->fpsLimiter.hTimer, &ddraw->fpsLimiter.dueTime, 0, NULL, NULL, FALSE);
-                }
+                if (!InterlockedExchange(&ddraw->incutscene, TRUE))
+                    UpdateVertices(TRUE, TRUE);
             }
             else
+            {
+                if (InterlockedExchange(&ddraw->incutscene, FALSE))
+                    UpdateVertices(FALSE, TRUE);
+            }
+        }
+
+        D3DLOCKED_RECT lock_rc;
+
+        if (InterlockedExchange(&ddraw->render.surfaceUpdated, FALSE))
+        {
+            if (++texIndex >= TEXTURE_COUNT)
+                texIndex = 0;
+
+            RECT rc = { 0,0,ddraw->width,ddraw->height };
+
+            if (SUCCEEDED(IDirect3DDevice9_SetTexture(D3dDev, 0, (IDirect3DBaseTexture9 *)SurfaceTex[texIndex])) &&
+                SUCCEEDED(IDirect3DTexture9_LockRect(SurfaceTex[texIndex], 0, &lock_rc, &rc, 0)))
+            {
+                unsigned char *src = (unsigned char *)ddraw->primary->surface;
+                unsigned char *dst = (unsigned char *)lock_rc.pBits;
+
+                int i;
+                for (i = 0; i < ddraw->height; i++)
+                {
+                    memcpy(dst, src, ddraw->primary->lPitch);
+
+                    src += ddraw->primary->lPitch;
+                    dst += lock_rc.Pitch;
+                }
+
+                IDirect3DTexture9_UnlockRect(SurfaceTex[texIndex], 0);
+            }
+        }
+
+        if (ddraw->bpp == 8 && InterlockedExchange(&ddraw->render.paletteUpdated, FALSE))
+        {
+            if (++palIndex >= TEXTURE_COUNT)
+                palIndex = 0;
+
+            RECT rc = { 0,0,256,1 };
+
+            if (SUCCEEDED(IDirect3DDevice9_SetTexture(D3dDev, 1, (IDirect3DBaseTexture9 *)PaletteTex[palIndex])) &&
+                SUCCEEDED(IDirect3DTexture9_LockRect(PaletteTex[palIndex], 0, &lock_rc, &rc, 0)))
+            {
+                memcpy(lock_rc.pBits, ddraw->primary->palette->data_rgb, 256 * sizeof(int));
+
+                IDirect3DTexture9_UnlockRect(PaletteTex[palIndex], 0);
+            }
+        }
+
+        if (!ddraw->handlemouse)
+        {
+            ChildWindowExists = FALSE;
+            EnumChildWindows(ddraw->hWnd, EnumChildProc, (LPARAM)ddraw->primary);
+
+            if (ddraw->render.width != ddraw->width || ddraw->render.height != ddraw->height)
+            {
+                if (ChildWindowExists)
+                {
+                    IDirect3DDevice9_Clear(D3dDev, 0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
+
+                    if (!needsUpdate && UpdateVertices(FALSE, FALSE))
+                        needsUpdate = TRUE;
+                }
+                else if (needsUpdate)
+                {
+                    if (UpdateVertices(FALSE, TRUE))
+                        needsUpdate = FALSE;
+                }
+            }
+        }
+    }
+
+    LeaveCriticalSection(&ddraw->cs);
+
+    IDirect3DDevice9_BeginScene(D3dDev);
+    IDirect3DDevice9_DrawPrimitive(D3dDev, D3DPT_TRIANGLESTRIP, 0, 2);
+    if (poptb_callback_func)
+        (*poptb_callback_func)();
+    IDirect3DDevice9_EndScene(D3dDev);
+
+    if (ddraw->bnetActive)
+        IDirect3DDevice9_Clear(D3dDev, 0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
+
+    if (FAILED(IDirect3DDevice9_Present(D3dDev, NULL, NULL, NULL, NULL)))
+    {
+        DWORD_PTR dwResult;
+        SendMessageTimeout(ddraw->hWnd, WM_D3D9DEVICELOST, 0, 0, 0, 1000, &dwResult);
+    }
+
+#if _DEBUG
+    DrawFrameInfoEnd();
+#endif
+
+    if (ddraw->fpsLimiter.ticklength > 0)
+    {
+        if (ddraw->fpsLimiter.hTimer)
+        {
+            if (ddraw->vsync)
+            {
+                WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
+                LARGE_INTEGER liDueTime = { .QuadPart = -ddraw->fpsLimiter.tickLengthNs };
+                SetWaitableTimer(ddraw->fpsLimiter.hTimer, &liDueTime, 0, NULL, NULL, FALSE);
+            }
+            else
+            {
+                FILETIME ft = { 0 };
+                GetSystemTimeAsFileTime(&ft);
+
+                if (CompareFileTime((FILETIME *)&ddraw->fpsLimiter.dueTime, &ft) == -1)
+                {
+                    memcpy(&ddraw->fpsLimiter.dueTime, &ft, sizeof(LARGE_INTEGER));
+                }
+                else
+                {
+                    WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
+                }
+
+                ddraw->fpsLimiter.dueTime.QuadPart += ddraw->fpsLimiter.tickLengthNs;
+                SetWaitableTimer(ddraw->fpsLimiter.hTimer, &ddraw->fpsLimiter.dueTime, 0, NULL, NULL, FALSE);
+            }
+        }
+        else
+        {
+            if (!poptb_callback_func)
             {
                 tickEnd = timeGetTime();
 
@@ -454,5 +506,21 @@ DWORD WINAPI render_d3d9_main(void)
             }
         }
     }
-    return 0;
+}
+
+DWORD WINAPI render_d3d9_main(void)
+{
+    if (poptb_callback_func)
+    {
+        render_graphics();
+        return TRUE;
+    } 
+    else
+    {
+        while (ddraw->render.run && WaitForSingleObject(ddraw->render.sem, 200) != WAIT_FAILED)
+        {
+            render_graphics();
+        }
+    }
+    return FALSE;
 }

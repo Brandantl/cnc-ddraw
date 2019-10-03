@@ -3,6 +3,14 @@ LIBRARY     ddraw.dll
 EXPORTS
     DirectDrawCreate                     @1
     DirectDrawEnumerateA                 @2
+    getD3dp                              @3
+    getD3d                               @4
+    getD3dDev                            @5
+    getVertexBuf                         @6
+    getDDraw                             @7
+    setPoptbCallback                     @8
+    getRenderFunc                        @9
+    setPoptbDeviceLost                   @10
     GameHandlesClose                     DATA
     NvOptimusEnablement                  DATA
     AmdPowerXpressRequestHighPerformance DATA
