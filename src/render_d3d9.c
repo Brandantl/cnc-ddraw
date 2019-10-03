@@ -19,28 +19,28 @@ static LPDIRECT3DVERTEXBUFFER9 VertexBuf;
 static IDirect3DTexture9 *SurfaceTex[TEXTURE_COUNT];
 static IDirect3DTexture9 *PaletteTex[TEXTURE_COUNT];
 static IDirect3DPixelShader9 *PixelShader;
-extern poptb_callback poptb_callback_func = NULL;
-extern poptb_callback poptb_device_lost = NULL;
+static poptb_callback poptb_callback_func = NULL;
+static poptb_callback poptb_device_lost = NULL;
 static float ScaleW;
 static float ScaleH;
 static int BitsPerPixel;
 
-poptb_renderer getRenderFunc()
+poptb_renderer __stdcall getRenderFunc()
 {
-    return render_d3d9_main;
+    return &render_d3d9_main;
 }
 
-void setPoptbCallback(poptb_callback ptr)
+void __stdcall setPoptbCallback(poptb_callback ptr)
 {
     poptb_callback_func = ptr;
 }
 
-void setPoptbDeviceLost(poptb_callback ptr)
+void __stdcall setPoptbDeviceLost(poptb_callback ptr)
 {
     poptb_device_lost = ptr;
 }
 
-D3DPRESENT_PARAMETERS* getD3dp()
+D3DPRESENT_PARAMETERS* __stdcall getD3dp()
 {
     return &D3dpp;
 }
@@ -50,17 +50,17 @@ LPDIRECT3D9* getD3d()
     return &D3d;
 }
 
-LPDIRECT3DDEVICE9* getD3dDev()
+LPDIRECT3DDEVICE9* __stdcall getD3dDev()
 {
     return &D3dDev;
 }
 
-LPDIRECT3DVERTEXBUFFER9* getVertexBuf()
+LPDIRECT3DVERTEXBUFFER9* __stdcall getVertexBuf()
 {
     return &VertexBuf;
 }
 
-IDirectDrawImpl** getDDraw()
+IDirectDrawImpl** __stdcall getDDraw()
 {
     return &ddraw;
 }
