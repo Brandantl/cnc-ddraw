@@ -50,15 +50,15 @@ BOOL key_press(TbInputKey key, BOOL bDown, void* lpParam)
 {
 #if !D3D_VERSION && ENABLE_NEW_GUI
     if (!first_init)
-        return TRUE;
+    {
+        auto & io = ImGui::GetIO();
 
-    auto & io = ImGui::GetIO();
+        io.KeyCtrl = CONTROL_ON;
+        io.KeyShift = SHIFT_ON;
+        io.KeyAlt = ALT_ON;
 
-    io.KeyCtrl = CONTROL_ON;
-    io.KeyShift = SHIFT_ON;
-    io.KeyAlt = ALT_ON;
-
-    io.KeysDown[key] = bDown;
+        io.KeysDown[key] = bDown;
+    }
 #endif
     return TRUE;
 }
@@ -67,23 +67,24 @@ BOOL mouse_change(TbInputKey key, BOOL bdown, SINT x, SINT y, void*)
 {
 #if !D3D_VERSION && ENABLE_NEW_GUI
     if (!first_init)
-        return TRUE;
-
-    auto & io = ImGui::GetIO();
-    io.MousePos.x = x;
-    io.MousePos.y = y;
-
-    switch (key)
     {
-    case LB_KEY_MOUSE_LEFT:
-        io.MouseDown[0] = bdown;
-        break;
-    case LB_KEY_MOUSE_MIDDLE:
-        io.MouseDown[2] = bdown;
-        break;
-    case LB_KEY_MOUSE_RIGHT:
-        io.MouseDown[1] = bdown;
-        break;
+
+        auto & io = ImGui::GetIO();
+        io.MousePos.x = x;
+        io.MousePos.y = y;
+
+        switch (key)
+        {
+        case LB_KEY_MOUSE_LEFT:
+            io.MouseDown[0] = bdown;
+            break;
+        case LB_KEY_MOUSE_MIDDLE:
+            io.MouseDown[2] = bdown;
+            break;
+        case LB_KEY_MOUSE_RIGHT:
+            io.MouseDown[1] = bdown;
+            break;
+        }
     }
 #endif
     return TRUE;
@@ -184,7 +185,7 @@ void draw_gui()
             io.DisplaySize.y = poptb_window_rect->bottom;
         else io.DisplaySize.y = gnsi.ScreenH;
 
-        // Adjust mouse due to resolution window
+        // Adjust mouse with respect to resolution window
         auto diff_x = static_cast<float>(io.DisplaySize.x) / gnsi.ScreenW;
         auto diff_y = static_cast<float>(io.DisplaySize.y) / gnsi.ScreenH;
         io.MousePos.x *= diff_x;
