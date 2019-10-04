@@ -11,6 +11,7 @@ EXPORTS
     setPoptbCallback                     @8
     getRenderFunc                        @9
     setPoptbDeviceLost                   @10
+    getWindowRect                        @11
     GameHandlesClose                     DATA
     NvOptimusEnablement                  DATA
     AmdPowerXpressRequestHighPerformance DATA

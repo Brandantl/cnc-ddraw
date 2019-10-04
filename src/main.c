@@ -49,6 +49,11 @@ BOOL ChildWindowExists;
 DWORD NvOptimusEnablement = 1;
 DWORD AmdPowerXpressRequestHighPerformance = 1;
 
+RECT* __stdcall getWindowRect()
+{
+    return &WindowRect;
+}
+
 //BOOL WINAPI DllMainCRTStartup(HINSTANCE hinstDLL, DWORD dwReason, LPVOID lpvReserved)
 BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
 {
