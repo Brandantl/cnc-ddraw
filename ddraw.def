@@ -6,12 +6,13 @@ EXPORTS
     getD3dp                              @3
     getD3d                               @4
     getD3dDev                            @5
-    getVertexBuf                         @6
-    getDDraw                             @7
-    setPoptbCallback                     @8
-    getRenderFunc                        @9
-    setPoptbDeviceLost                   @10
-    getWindowRect                        @11
+    getDDraw                             @6
+    setPoptbCallback                     @7
+    setPoptbDeviceLost                   @8
+    getWindowRect                        @9
+    poptb_DeviceLost                     @10
+    poptb_getOpenGLRenderer              @11
+    poptb_getDirectXRenderer             @12
     GameHandlesClose                     DATA
     NvOptimusEnablement                  DATA
     AmdPowerXpressRequestHighPerformance DATA

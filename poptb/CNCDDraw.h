@@ -60,7 +60,7 @@ typedef struct IDirectDrawImpl
     BOOL windowed;
     BOOL border;
     BOOL boxing;
-    DEVMODE mode;
+    DEVMODEA mode;
     struct IDirectDrawSurfaceImpl *primary;
     char title[128];
     HMODULE real_dll;
@@ -83,7 +83,7 @@ typedef struct IDirectDrawImpl
         BOOL run;
         HANDLE ev;
         HANDLE sem;
-        DEVMODE mode;
+        DEVMODEA mode;
         struct { int width; int height; int x; int y; } viewport;
 
         LONG paletteUpdated;
@@ -128,15 +128,37 @@ typedef struct IDirectDrawImpl
 
 } IDirectDrawImpl;
 
-typedef DWORD(__stdcall *poptb_renderer)(void);
+enum class Renderers
+{
+    NONE,
+    DIRECTX9,
+    OPENGL
+};
 
-extern D3DPRESENT_PARAMETERS*   poptb_d3d_params;
-extern LPDIRECT3D9*             poptb_d3d;
+typedef void(__stdcall *poptb_callback)(void);
+typedef DWORD(__stdcall *poptb_renderer)(void);
+typedef DWORD(WINAPI *ccdraw_renderer)(void);
+
 extern LPDIRECT3DDEVICE9*       poptb_d3d_device;
-extern LPDIRECT3DVERTEXBUFFER9* poptb_d3d_vertex_buff;
+
 extern IDirectDrawImpl**        poptb_ddraw_ptr;
-extern poptb_renderer           render_game_plz;
 extern RECT*                    poptb_window_rect;
+extern poptb_callback           poptb_device_lost;
+extern ccdraw_renderer          poptb_directx_renderer;
+extern ccdraw_renderer          poptb_opengl_renderer;
+
+inline Renderers identify_poptb_renderer()
+{
+    if (poptb_ddraw_ptr && *poptb_ddraw_ptr)
+    {
+        if ((*poptb_ddraw_ptr)->renderer == poptb_directx_renderer)
+            return Renderers::DIRECTX9;
+
+        if ((*poptb_ddraw_ptr)->renderer == poptb_opengl_renderer)
+            return Renderers::OPENGL;
+    }
+    return Renderers::NONE;
+}
 
 extern void setup_cnc_ddraw();
 extern void init_callbacks();

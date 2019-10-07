@@ -160,6 +160,7 @@ void Settings_Load()
 
 void Settings_Save(RECT *lpRect, int windowState)
 {
+    return; // Do not overwirte settings.
     char buf[16];
 
     if (lpRect->right)

@@ -33,10 +33,13 @@
 DEFINE_GUID(IID_IMediaStream, 0xb502d1bd, 0x9a57, 0x11d0, 0x8f, 0xde, 0x00, 0xc0, 0x4f, 0xd9, 0x18, 0x9d);
 DEFINE_GUID(IID_IAMMediaStream, 0xbebe595d, 0x9a6f, 0x11d0, 0x8f, 0xde, 0x00, 0xc0, 0x4f, 0xd9, 0x18, 0x9d);
 
+typedef void(__stdcall *poptb_callback)(void);
 extern BOOL ShowDriverWarning;
 extern RECT WindowRect;
 extern int WindowState;
 extern BOOL ChildWindowExists;
+extern poptb_callback poptb_callback_func;
+extern poptb_callback poptb_device_lost;
 
 BOOL detect_cutscene();
 void LimitGameTicks();

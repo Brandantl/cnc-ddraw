@@ -61,34 +61,53 @@ static BOOL ShaderTest();
 
 DWORD WINAPI render_main(void)
 {
-    Sleep(500);
-    GotError = UseOpenGL = FALSE;
+    static int first_run = 1;
 
-    OpenGLContext = CreateContext(ddraw->render.hDC);
-    if (OpenGLContext)
+    if (first_run || !UseOpenGL)
     {
-        OpenGL_Init();
-        SetMaxFPS();
-        BuildPrograms();
-        CreateTextures(ddraw->width, ddraw->height);
-        InitMainProgram();
-        InitScaleProgram();
+        GotError = UseOpenGL = FALSE;
+        OpenGLContext = CreateContext(ddraw->render.hDC);
 
-        GotError = GotError || !TextureUploadTest();
-        GotError = GotError || !ShaderTest();
-        GotError = GotError || glGetError() != GL_NO_ERROR;
-        UseOpenGL = (MainProgram || ddraw->bpp == 16) && !GotError;
+        if (OpenGLContext)
+        {
+            OpenGL_Init();
+            SetMaxFPS();
+            BuildPrograms();
+            CreateTextures(ddraw->width, ddraw->height);
+            InitMainProgram();
+            InitScaleProgram();
 
-        Render();
+            GotError = GotError || !TextureUploadTest();
+            GotError = GotError || !ShaderTest();
+            GotError = GotError || glGetError() != GL_NO_ERROR;
+            UseOpenGL = (MainProgram || ddraw->bpp == 16) && !GotError;
+        }
 
-        DeleteContext(OpenGLContext);
+        if (!UseOpenGL)
+        {
+            ShowDriverWarning = TRUE;
+            ddraw->renderer = render_soft_main;
+            render_soft_main();
+            return 0;
+        }
+        first_run = 0;
     }
 
-    if (!UseOpenGL)
+    if (ddraw->renderer == render_soft_main)
     {
-        ShowDriverWarning = TRUE;
-        ddraw->renderer = render_soft_main;
         render_soft_main();
+        return 0;
+    }
+
+    if (poptb_callback_func)
+    {
+        Render();
+        return 0;
+    }
+    else
+    {
+        Render();
+        DeleteContext(OpenGLContext);
     }
 
     return 0;
@@ -550,290 +569,313 @@ static void InitScaleProgram()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-static void Render()
+static void Renderer_Impl()
 {
-    DWORD tickStart = 0;
-    DWORD tickEnd = 0;
-    BOOL needsUpdate = FALSE;
-
-    glViewport(
-        ddraw->render.viewport.x, ddraw->render.viewport.y,
-        ddraw->render.viewport.width, ddraw->render.viewport.height);
-
-    if (MainProgram)
-        glUseProgram(MainProgram);
-    else if (ddraw->bpp == 16)
-        glEnable(GL_TEXTURE_2D);
-
-    while (UseOpenGL && ddraw->render.run && WaitForSingleObject(ddraw->render.sem, INFINITE) != WAIT_FAILED)
-    {
+    static DWORD tickStart = 0;
+    static DWORD tickEnd = 0;
+    static BOOL needsUpdate = FALSE;
 #if _DEBUG
-        DrawFrameInfoStart();
+    DrawFrameInfoStart();
 #endif
 
-        ScaleW = (float)ddraw->width / SurfaceTexWidth;
-        ScaleH = (float)ddraw->height / SurfaceTexHeight;
+    ScaleW = (float)ddraw->width / SurfaceTexWidth;
+    ScaleH = (float)ddraw->height / SurfaceTexHeight;
 
-        static int texIndex = 0, palIndex = 0;
+    static int texIndex = 0, palIndex = 0;
 
-        BOOL scaleChanged = FALSE;
+    BOOL scaleChanged = FALSE;
 
-        if (ddraw->fpsLimiter.ticklength > 0)
-            tickStart = timeGetTime();
+    if (ddraw->fpsLimiter.ticklength > 0)
+        tickStart = timeGetTime();
 
-        EnterCriticalSection(&ddraw->cs);
+    EnterCriticalSection(&ddraw->cs);
 
-        if (ddraw->primary && (ddraw->bpp == 16 || ddraw->primary->palette))
+    if (ddraw->primary && (ddraw->bpp == 16 || ddraw->primary->palette))
+    {
+        if (ddraw->vhack)
         {
-            if (ddraw->vhack)
+            if (detect_cutscene())
             {
-                if (detect_cutscene())
-                {
-                    ScaleW *= (float)CUTSCENE_WIDTH / ddraw->width;
-                    ScaleH *= (float)CUTSCENE_HEIGHT / ddraw->height;
+                ScaleW *= (float)CUTSCENE_WIDTH / ddraw->width;
+                ScaleH *= (float)CUTSCENE_HEIGHT / ddraw->height;
 
-                    if (!InterlockedExchange(&ddraw->incutscene, TRUE))
-                        scaleChanged = TRUE;
-                }
-                else
-                {
-                    if (InterlockedExchange(&ddraw->incutscene, FALSE))
-                        scaleChanged = TRUE;
-                }
+                if (!InterlockedExchange(&ddraw->incutscene, TRUE))
+                    scaleChanged = TRUE;
             }
-
-            if (ddraw->bpp == 8 && InterlockedExchange(&ddraw->render.paletteUpdated, FALSE))
+            else
             {
-                if (++palIndex >= TEXTURE_COUNT)
-                    palIndex = 0;
-
-                glBindTexture(GL_TEXTURE_2D, PaletteTexIds[palIndex]);
-
-                glTexSubImage2D(
-                    GL_TEXTURE_2D,
-                    0,
-                    0,
-                    0,
-                    256,
-                    1,
-                    GL_RGBA,
-                    GL_UNSIGNED_BYTE,
-                    ddraw->primary->palette->data_bgr);
-            }
-
-            if (InterlockedExchange(&ddraw->render.surfaceUpdated, FALSE))
-            {
-                if (++texIndex >= TEXTURE_COUNT)
-                    texIndex = 0;
-
-                glBindTexture(GL_TEXTURE_2D, SurfaceTexIds[texIndex]);
-
-                if (AdjustAlignment)
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-                glTexSubImage2D(
-                    GL_TEXTURE_2D,
-                    0,
-                    0,
-                    0,
-                    ddraw->width,
-                    ddraw->height,
-                    SurfaceFormat,
-                    SurfaceType,
-                    ddraw->primary->surface);
-
-                if (AdjustAlignment)
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-            }
-
-            static int errorCheckCount = 0;
-            if (errorCheckCount < 20)
-            {
-                glClear(GL_COLOR_BUFFER_BIT);
-
-                errorCheckCount++;
-
-                if (glGetError() != GL_NO_ERROR)
-                    UseOpenGL = FALSE;
-            }
-
-            if (!ddraw->handlemouse)
-            {
-                ChildWindowExists = FALSE;
-                EnumChildWindows(ddraw->hWnd, EnumChildProc, (LPARAM)ddraw->primary);
-                
-                if (ddraw->render.width != ddraw->width || ddraw->render.height != ddraw->height)
-                {
-                    if (ChildWindowExists)
-                    {
-                        glClear(GL_COLOR_BUFFER_BIT);
-
-                        if (!needsUpdate)
-                        {
-                            glViewport(0, ddraw->render.height - ddraw->height, ddraw->width, ddraw->height);
-                            needsUpdate = TRUE;
-                        }
-                    }
-                    else if (needsUpdate)
-                    {
-                        glViewport(
-                            ddraw->render.viewport.x, ddraw->render.viewport.y,
-                            ddraw->render.viewport.width, ddraw->render.viewport.height);
-
-                        needsUpdate = FALSE;
-                    }
-                }
+                if (InterlockedExchange(&ddraw->incutscene, FALSE))
+                    scaleChanged = TRUE;
             }
         }
 
-        LeaveCriticalSection(&ddraw->cs);
-
-        if (scaleChanged)
+        if (ddraw->bpp == 8 && InterlockedExchange(&ddraw->render.paletteUpdated, FALSE))
         {
-            if (ScaleProgram && MainProgram)
-            {
-                glBindVertexArray(MainVAO);
-                glBindBuffer(GL_ARRAY_BUFFER, MainVBOs[1]);
-                GLfloat texCoord[] = {
-                    0.0f,   0.0f,
-                    0.0f,   ScaleH,
-                    ScaleW, ScaleH,
-                    ScaleW, 0.0f,
-                };
-                glBufferData(GL_ARRAY_BUFFER, sizeof(texCoord), texCoord, GL_STATIC_DRAW);
-                glVertexAttribPointer(MainTexCoordAttrLoc, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-                glEnableVertexAttribArray(MainTexCoordAttrLoc);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-                glBindVertexArray(0);
-            }
-            else if (OpenGL_GotVersion3 && MainProgram)
-            {
-                glBindVertexArray(MainVAO);
-                glBindBuffer(GL_ARRAY_BUFFER, MainVBOs[1]);
-                GLfloat texCoord[] = {
-                    0.0f,    0.0f,
-                    ScaleW,  0.0f,
-                    ScaleW,  ScaleH,
-                    0.0f,    ScaleH,
-                };
-                glBufferData(GL_ARRAY_BUFFER, sizeof(texCoord), texCoord, GL_STATIC_DRAW);
-                glVertexAttribPointer(MainTexCoordAttrLoc, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-                glEnableVertexAttribArray(MainTexCoordAttrLoc);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-                glBindVertexArray(0);
-            }
-        }
+            if (++palIndex >= TEXTURE_COUNT)
+                palIndex = 0;
 
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, SurfaceTexIds[texIndex]);
-
-        if (ddraw->bpp == 8)
-        {
-            glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, PaletteTexIds[palIndex]);
 
-            glActiveTexture(GL_TEXTURE0);
+            glTexSubImage2D(
+                GL_TEXTURE_2D,
+                0,
+                0,
+                0,
+                256,
+                1,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                ddraw->primary->palette->data_bgr);
         }
 
+        if (InterlockedExchange(&ddraw->render.surfaceUpdated, FALSE))
+        {
+            if (++texIndex >= TEXTURE_COUNT)
+                texIndex = 0;
+
+            glBindTexture(GL_TEXTURE_2D, SurfaceTexIds[texIndex]);
+
+            if (AdjustAlignment)
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+            glTexSubImage2D(
+                GL_TEXTURE_2D,
+                0,
+                0,
+                0,
+                ddraw->width,
+                ddraw->height,
+                SurfaceFormat,
+                SurfaceType,
+                ddraw->primary->surface);
+
+            if (AdjustAlignment)
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        }
+
+        static int errorCheckCount = 0;
+        if (errorCheckCount < 20)
+        {
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            errorCheckCount++;
+
+            if (glGetError() != GL_NO_ERROR)
+                UseOpenGL = FALSE;
+        }
+
+        if (!ddraw->handlemouse)
+        {
+            ChildWindowExists = FALSE;
+            EnumChildWindows(ddraw->hWnd, EnumChildProc, (LPARAM)ddraw->primary);
+
+            if (ddraw->render.width != ddraw->width || ddraw->render.height != ddraw->height)
+            {
+                if (ChildWindowExists)
+                {
+                    glClear(GL_COLOR_BUFFER_BIT);
+
+                    if (!needsUpdate)
+                    {
+                        glViewport(0, ddraw->render.height - ddraw->height, ddraw->width, ddraw->height);
+                        needsUpdate = TRUE;
+                    }
+                }
+                else if (needsUpdate)
+                {
+                    glViewport(
+                        ddraw->render.viewport.x, ddraw->render.viewport.y,
+                        ddraw->render.viewport.width, ddraw->render.viewport.height);
+
+                    needsUpdate = FALSE;
+                }
+            }
+        }
+    }
+
+    LeaveCriticalSection(&ddraw->cs);
+
+    if (scaleChanged)
+    {
         if (ScaleProgram && MainProgram)
         {
-            // draw surface into framebuffer
-            glUseProgram(MainProgram);
-
-            glViewport(0, 0, ddraw->width, ddraw->height);
-
-            glBindFramebuffer(GL_FRAMEBUFFER, FrameBufferId);
-
             glBindVertexArray(MainVAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-            glBindVertexArray(0);
-
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, 0);
-
-            if (ChildWindowExists)
-                glViewport(0, ddraw->render.height - ddraw->height, ddraw->width, ddraw->height);
-            else
-                glViewport(
-                    ddraw->render.viewport.x, ddraw->render.viewport.y,
-                    ddraw->render.viewport.width, ddraw->render.viewport.height);
-
-            // apply filter
-
-            glUseProgram(ScaleProgram);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, FrameBufferTexId);
-
-            static int frames = 1;
-            if (FrameCountUniLoc != -1)
-                glUniform1i(FrameCountUniLoc, frames++);
-
-            glBindVertexArray(ScaleVAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+            glBindBuffer(GL_ARRAY_BUFFER, MainVBOs[1]);
+            GLfloat texCoord[] = {
+                0.0f,   0.0f,
+                0.0f,   ScaleH,
+                ScaleW, ScaleH,
+                ScaleW, 0.0f,
+            };
+            glBufferData(GL_ARRAY_BUFFER, sizeof(texCoord), texCoord, GL_STATIC_DRAW);
+            glVertexAttribPointer(MainTexCoordAttrLoc, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+            glEnableVertexAttribArray(MainTexCoordAttrLoc);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
             glBindVertexArray(0);
         }
         else if (OpenGL_GotVersion3 && MainProgram)
         {
             glBindVertexArray(MainVAO);
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+            glBindBuffer(GL_ARRAY_BUFFER, MainVBOs[1]);
+            GLfloat texCoord[] = {
+                0.0f,    0.0f,
+                ScaleW,  0.0f,
+                ScaleW,  ScaleH,
+                0.0f,    ScaleH,
+            };
+            glBufferData(GL_ARRAY_BUFFER, sizeof(texCoord), texCoord, GL_STATIC_DRAW);
+            glVertexAttribPointer(MainTexCoordAttrLoc, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+            glEnableVertexAttribArray(MainTexCoordAttrLoc);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
             glBindVertexArray(0);
         }
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, SurfaceTexIds[texIndex]);
+
+    if (ddraw->bpp == 8)
+    {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, PaletteTexIds[palIndex]);
+
+        glActiveTexture(GL_TEXTURE0);
+    }
+
+    if (ScaleProgram && MainProgram)
+    {
+        // draw surface into framebuffer
+        glUseProgram(MainProgram);
+
+        glViewport(0, 0, ddraw->width, ddraw->height);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, FrameBufferId);
+
+        glBindVertexArray(MainVAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        glBindVertexArray(0);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        if (ChildWindowExists)
+            glViewport(0, ddraw->render.height - ddraw->height, ddraw->width, ddraw->height);
         else
-        {
-            glBegin(GL_TRIANGLE_FAN);
-            glTexCoord2f(0, 0);             glVertex2f(-1, 1);
-            glTexCoord2f(ScaleW, 0);        glVertex2f(1, 1);
-            glTexCoord2f(ScaleW, ScaleH);   glVertex2f(1, -1);
-            glTexCoord2f(0, ScaleH);        glVertex2f(-1, -1);
-            glEnd();
-        }
+            glViewport(
+                ddraw->render.viewport.x, ddraw->render.viewport.y,
+                ddraw->render.viewport.width, ddraw->render.viewport.height);
 
-        if (ddraw->bnetActive)
-            glClear(GL_COLOR_BUFFER_BIT);
+        // apply filter
 
-        SwapBuffers(ddraw->render.hDC);
+        glUseProgram(ScaleProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, FrameBufferTexId);
+
+        static int frames = 1;
+        if (FrameCountUniLoc != -1)
+            glUniform1i(FrameCountUniLoc, frames++);
+
+        glBindVertexArray(ScaleVAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        glBindVertexArray(0);
+    }
+    else if (OpenGL_GotVersion3 && MainProgram)
+    {
+        glBindVertexArray(MainVAO);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+        glBindVertexArray(0);
+    }
+    else
+    {
+        glBegin(GL_TRIANGLE_FAN);
+        glTexCoord2f(0, 0);             glVertex2f(-1, 1);
+        glTexCoord2f(ScaleW, 0);        glVertex2f(1, 1);
+        glTexCoord2f(ScaleW, ScaleH);   glVertex2f(1, -1);
+        glTexCoord2f(0, ScaleH);        glVertex2f(-1, -1);
+        glEnd();
+    }
+
+    if (poptb_callback_func)
+        (*poptb_callback_func)();
+
+    if (ddraw->bnetActive)
+        glClear(GL_COLOR_BUFFER_BIT);
+
+    SwapBuffers(ddraw->render.hDC);
 
 #if _DEBUG
-        DrawFrameInfoEnd();
+    DrawFrameInfoEnd();
 #endif
 
-        if (ddraw->fpsLimiter.ticklength > 0)
+    if (ddraw->fpsLimiter.ticklength > 0)
+    {
+        if (ddraw->fpsLimiter.hTimer)
         {
-            if (ddraw->fpsLimiter.hTimer)
+            if (ddraw->vsync)
             {
-                if (ddraw->vsync)
+                WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
+                LARGE_INTEGER liDueTime = { .QuadPart = -ddraw->fpsLimiter.tickLengthNs };
+                SetWaitableTimer(ddraw->fpsLimiter.hTimer, &liDueTime, 0, NULL, NULL, FALSE);
+            }
+            else
+            {
+                FILETIME ft = { 0 };
+                GetSystemTimeAsFileTime(&ft);
+
+                if (CompareFileTime((FILETIME *)&ddraw->fpsLimiter.dueTime, &ft) == -1)
                 {
-                    WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
-                    LARGE_INTEGER liDueTime = { .QuadPart = -ddraw->fpsLimiter.tickLengthNs };
-                    SetWaitableTimer(ddraw->fpsLimiter.hTimer, &liDueTime, 0, NULL, NULL, FALSE);
+                    memcpy(&ddraw->fpsLimiter.dueTime, &ft, sizeof(LARGE_INTEGER));
                 }
                 else
                 {
-                    FILETIME ft = { 0 };
-                    GetSystemTimeAsFileTime(&ft);
-
-                    if (CompareFileTime((FILETIME *)&ddraw->fpsLimiter.dueTime, &ft) == -1)
-                    {
-                        memcpy(&ddraw->fpsLimiter.dueTime, &ft, sizeof(LARGE_INTEGER));
-                    }
-                    else
-                    {
-                        WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
-                    }
-
-                    ddraw->fpsLimiter.dueTime.QuadPart += ddraw->fpsLimiter.tickLengthNs;
-                    SetWaitableTimer(ddraw->fpsLimiter.hTimer, &ddraw->fpsLimiter.dueTime, 0, NULL, NULL, FALSE);
+                    WaitForSingleObject(ddraw->fpsLimiter.hTimer, ddraw->fpsLimiter.ticklength * 2);
                 }
+
+                ddraw->fpsLimiter.dueTime.QuadPart += ddraw->fpsLimiter.tickLengthNs;
+                SetWaitableTimer(ddraw->fpsLimiter.hTimer, &ddraw->fpsLimiter.dueTime, 0, NULL, NULL, FALSE);
             }
-            else
+        }
+        else
+        {
+            if (!poptb_callback_func)
             {
                 tickEnd = timeGetTime();
 
                 if (tickEnd - tickStart < ddraw->fpsLimiter.ticklength)
                     Sleep(ddraw->fpsLimiter.ticklength - (tickEnd - tickStart));
             }
+        }
+    }
+}
+
+static void Render()
+{
+    static int first_init = 1;
+
+    if (first_init)
+    {
+        glViewport(ddraw->render.viewport.x, ddraw->render.viewport.y, ddraw->render.viewport.width, ddraw->render.viewport.height);
+
+        if (MainProgram)
+            glUseProgram(MainProgram);
+        else if (ddraw->bpp == 16)
+            glEnable(GL_TEXTURE_2D);
+
+        first_init = 0;
+    }
+
+    if (poptb_callback_func)
+    {
+        Renderer_Impl();
+        return;
+    }
+    else
+    {
+        while (UseOpenGL && ddraw->render.run && WaitForSingleObject(ddraw->render.sem, INFINITE) != WAIT_FAILED)
+        {
+            Renderer_Impl();
         }
     }
 }

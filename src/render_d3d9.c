@@ -9,9 +9,6 @@
 #define TEXTURE_COUNT 2
 
 HMODULE Direct3D9_hModule;
-
-typedef DWORD(WINAPI *poptb_renderer)(void);
-typedef void(__stdcall *poptb_callback)(void);
 static D3DPRESENT_PARAMETERS D3dpp;
 static LPDIRECT3D9 D3d;
 static LPDIRECT3DDEVICE9 D3dDev;
@@ -19,26 +16,9 @@ static LPDIRECT3DVERTEXBUFFER9 VertexBuf;
 static IDirect3DTexture9 *SurfaceTex[TEXTURE_COUNT];
 static IDirect3DTexture9 *PaletteTex[TEXTURE_COUNT];
 static IDirect3DPixelShader9 *PixelShader;
-static poptb_callback poptb_callback_func = NULL;
-static poptb_callback poptb_device_lost = NULL;
 static float ScaleW;
 static float ScaleH;
 static int BitsPerPixel;
-
-poptb_renderer __stdcall getRenderFunc()
-{
-    return &render_d3d9_main;
-}
-
-void __stdcall setPoptbCallback(poptb_callback ptr)
-{
-    poptb_callback_func = ptr;
-}
-
-void __stdcall setPoptbDeviceLost(poptb_callback ptr)
-{
-    poptb_device_lost = ptr;
-}
 
 D3DPRESENT_PARAMETERS* __stdcall getD3dp()
 {
@@ -53,16 +33,6 @@ LPDIRECT3D9* getD3d()
 LPDIRECT3DDEVICE9* __stdcall getD3dDev()
 {
     return &D3dDev;
-}
-
-LPDIRECT3DVERTEXBUFFER9* __stdcall getVertexBuf()
-{
-    return &VertexBuf;
-}
-
-IDirectDrawImpl** __stdcall getDDraw()
-{
-    return &ddraw;
 }
 
 static BOOL CreateResources();
@@ -116,21 +86,26 @@ BOOL Direct3D9_Create()
                         D3DCREATE_MULTITHREADED | behaviorFlags[i],
                         &D3dpp,
                         &D3dDev)))
+                {
+                    if (poptb_device_lost)
+                        (*poptb_device_lost)();
                     return D3dDev && CreateResources() && SetStates();
+                }
             }
         }
     }
-
     return FALSE;
 }
 
 BOOL Direct3D9_OnDeviceLost()
 {
     if (D3dDev && IDirect3DDevice9_TestCooperativeLevel(D3dDev) == D3DERR_DEVICENOTRESET)
-        return Direct3D9_Reset();
+    {
+        if (poptb_device_lost)
+            (*poptb_device_lost)();
 
-    if (poptb_device_lost)
-        (*poptb_device_lost)();
+        return Direct3D9_Reset();
+    }
 
     return FALSE;
 }
@@ -339,13 +314,13 @@ static void SetMaxFPS()
     }
 }
 
-static BOOL first_run = TRUE;
-static DWORD tickStart = 0;
-static DWORD tickEnd = 0;
-static BOOL needsUpdate = FALSE;
-
 DWORD WINAPI render_graphics(void)
 {
+    static BOOL first_run = TRUE;
+    static DWORD tickStart = 0;
+    static DWORD tickEnd = 0;
+    static BOOL needsUpdate = FALSE;
+
     if (first_run == TRUE)
     {
         SetMaxFPS();
@@ -506,6 +481,7 @@ DWORD WINAPI render_graphics(void)
             }
         }
     }
+    return TRUE;
 }
 
 DWORD WINAPI render_d3d9_main(void)

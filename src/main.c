@@ -48,10 +48,47 @@ BOOL GameHandlesClose;
 BOOL ChildWindowExists;
 DWORD NvOptimusEnablement = 1;
 DWORD AmdPowerXpressRequestHighPerformance = 1;
+poptb_callback poptb_callback_func = NULL;
+poptb_callback poptb_device_lost = NULL;
+
+typedef DWORD(WINAPI *ccdraw_renderer)(void);
+void __stdcall setPoptbCallback(poptb_callback ptr)
+{
+    poptb_callback_func = ptr;
+}
+
+void __stdcall setPoptbDeviceLost(poptb_callback ptr)
+{
+    poptb_device_lost = ptr;
+}
 
 RECT* __stdcall getWindowRect()
 {
     return &WindowRect;
+}
+
+void __stdcall poptb_DeviceLost()
+{
+    if (Direct3D9Active && Direct3D9_OnDeviceLost())
+    {
+        if (!ddraw->windowed)
+            mouse_lock();
+    }
+}
+
+ccdraw_renderer __stdcall poptb_getDirectXRenderer()
+{
+    return &render_d3d9_main;
+}
+
+ccdraw_renderer __stdcall poptb_getOpenGLRenderer()
+{
+    return &render_main;
+}
+
+IDirectDrawImpl** __stdcall getDDraw()
+{
+    return &ddraw;
 }
 
 //BOOL WINAPI DllMainCRTStartup(HINSTANCE hinstDLL, DWORD dwReason, LPVOID lpvReserved)
@@ -432,6 +469,14 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
             { 1280, 1024 },
             { 1280, 720 },
             { 1920, 1080 },
+            { 1920, 1200 },
+            { 1920, 1440 },
+            { 2048, 1152 },
+            { 2048, 1536 },
+            { 2560, 1600 },
+            { 2560, 1920 },
+            { 2560, 2048 },
+            { 3840, 2160 },
         };
 
         for (i = 0; i < sizeof(resolutions) / sizeof(resolutions[0]); i++)

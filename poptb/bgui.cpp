@@ -1,5 +1,7 @@
 #include    "Game.h"
 #include    "bgui.h"
+#include    "engine3.h"
+#include    "fenewmlt.h"
 
 #if !D3D_VERSION
 #include    "CNCDDraw.h"
@@ -8,67 +10,95 @@
 #include    "imgui_impl_dx9.h"
 #endif
 
-bool in_new_gui = false;
-bool enable_draw = false;
-static bool first_init = true;
-
-void draw_gui_windows(bool & terminate);
-
-void on_text_input(const char c)
+enum class windows_available
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    auto & io = ImGui::GetIO();
-    io.AddInputCharacter(c);
+    Main_Menu,
+    Debug_Ouput,
+    END
+};
+
+struct bgui_window windows[] =
+{
+    { "Main Menu",      false, nullptr,  bgui::draw_menu,           { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_Appearing,     true, true, true, true, true, false, true },
+    { "Debug Ouput",    false, nullptr,  bgui::draw_debug_output,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
+    { nullptr, 0, 0, 0, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, 0, 0, 0, 0, 0, 0, 0 } // END
+};
+
+bool bgui::is_initd;
+bgui_state bgui::state;
+eastl::vector<struct bgui_window*> bgui::all_windows;
+
+void bgui::add_window_array_to_vect(struct bgui_window * w)
+{
+    for (auto curr = w; curr->name; curr++)
+        all_windows.push_back(curr);
+}
+
+void bgui::init()
+{
+#if !D3D_VERSION
+    if (identify_poptb_renderer() != Renderers::DIRECTX9)
+        return; // No OpenGL support
+
+    // Setup ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui_ImplWin32_Init(nullptr);
+
+    if (identify_poptb_renderer() == Renderers::DIRECTX9)
+        ImGui_ImplDX9_Init((*poptb_d3d_device));
+    ImGui::StyleColorsDark();
+
+    // Setup window vectors
+    add_window_array_to_vect(&windows[0]);
+    add_window_array_to_vect(engine_draw_getWindows());
+    add_window_array_to_vect(fenewmlt_getWindows());
+    add_window_array_to_vect(gsi.Script3.getWindows());
+    is_initd = true;
 #endif
 }
 
-bool is_mouse_over_gui()
+void bgui::deinit()
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
+#if !D3D_VERSION
+    if (is_initd)
     {
-        const auto & io = ImGui::GetIO();
-        return io.WantCaptureMouse;
+        is_initd = false;
+        ImGui_ImplDX9_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+    }
+#endif
+}
+
+bool bgui::bgui::is_mouse_over_gui()
+{
+#if !D3D_VERSION
+    if (is_initd)
+    {
+        return ImGui::GetIO().WantCaptureMouse;
     }
 #endif
     return false;
 }
 
-bool is_keyboard_input_required()
+bool bgui::bgui::is_keyboard_input_required()
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
+#if !D3D_VERSION
+    if (is_initd)
     {
-        const auto & io = ImGui::GetIO();
-        return io.WantCaptureKeyboard;
+        return ImGui::GetIO().WantCaptureKeyboard;
     }
 #endif
     return false;
 }
 
-BOOL key_press(TbInputKey key, BOOL bDown, void* lpParam)
+BOOL bgui::handle_mouse_button(TbInputKey key, BOOL bdown, SINT x, SINT y, void*)
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
+#if !D3D_VERSION
+    if (is_initd)
     {
-        auto & io = ImGui::GetIO();
-
-        io.KeyCtrl = CONTROL_ON;
-        io.KeyShift = SHIFT_ON;
-        io.KeyAlt = ALT_ON;
-
-        io.KeysDown[key] = bDown;
-    }
-#endif
-    return TRUE;
-}
-
-BOOL mouse_change(TbInputKey key, BOOL bdown, SINT x, SINT y, void*)
-{
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
-    {
-
         auto & io = ImGui::GetIO();
         io.MousePos.x = x;
         io.MousePos.y = y;
@@ -87,91 +117,109 @@ BOOL mouse_change(TbInputKey key, BOOL bdown, SINT x, SINT y, void*)
         }
     }
 #endif
-    return TRUE;
+    return 0;
 }
 
-bool is_gui_active()
+BOOL bgui::handle_keyboard(TbInputKey key, BOOL bDown, void * lpParam)
 {
-    return in_new_gui;
+#if !D3D_VERSION
+    if (is_initd)
+    {
+        auto & io = ImGui::GetIO();
+
+        io.KeyCtrl = CONTROL_ON;
+        io.KeyShift = SHIFT_ON;
+        io.KeyAlt = ALT_ON;
+
+        io.KeysDown[key] = bDown;
+    }
+#endif
+    return 0;
 }
 
-bool should_i_switch = false;
-void invert_new_gui()
+void bgui::handle_text_input(const char c)
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    should_i_switch = !should_i_switch;
+#if !D3D_VERSION
+    ImGui::GetIO().AddInputCharacter(c);
 #endif
 }
 
-void switch_mode(bool mode)
+void bgui::reset_render_engine()
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-
-    if (!mode)
-    {
-        in_new_gui = false;
-    }
-    else
-    {
-        if (first_init)
-        {
-            // Setup ImGui
-            IMGUI_CHECKVERSION();
-            ImGui::CreateContext();
-            ImGuiIO& io = ImGui::GetIO();
-            ImGui_ImplWin32_Init(nullptr);
-            ImGui_ImplDX9_Init((*poptb_d3d_device));
-            ImGui::StyleColorsDark();
-            first_init = false;
-        }
-
-        in_new_gui = true;
-    }
-#endif
-}
-
-void gui_res_changed()
-{
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
+#if !D3D_VERSION
+    if (is_initd)
     {
         // Reinit DX9
-        ImGui_ImplDX9_Shutdown();
-        ImGui_ImplDX9_Init((*poptb_d3d_device));
+        if (identify_poptb_renderer() == Renderers::DIRECTX9)
+        {
+            ImGui_ImplDX9_Shutdown();
+            ImGui_ImplDX9_Init((*poptb_d3d_device));
+        }
     }
 #endif
 }
 
-void gui_shutdown()
+void bgui::open_main_menu()
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
-    {
-        ImGui_ImplDX9_Shutdown();
-        ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext();
-    }
+    auto & window = windows[(int)windows_available::Main_Menu];
+    window.visible = true;
+}
+
+bool bgui::can_i_draw_window(const bgui_window & window)
+{
+#if !D3D_VERSION
+    if (!window.visible)
+        return false;
+
+    return can_i_add_button_to_menu(window);
+#else
+    return false;
 #endif
 }
 
-// GUI Driver code
-void draw_gui()
+bool bgui::can_i_add_button_to_menu(const bgui_window & window)
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (!first_init)
-    {
-        // States
-        static bool terminate = false;
-        static bool is_keyboard_active = false;
+#if !D3D_VERSION
+    if (!window.allowed_online && (gnsi.Flags & GNS_NETWORK))
+        return false;
 
+    if (!window.allowed_single_player && !prnet)
+        return false;
+
+    if (!window.allowed_inside_main_game && (gnsi.GameMode.Mode != GM_MAIN_GAME))
+        return false;
+
+    if (!window.allowed_outside_main_game && (gnsi.GameMode.Mode == GM_MAIN_GAME))
+        return false;
+
+#if !CM_DEVELOPMENT
+    if (!window.allowed_online_in_release && (gnsi.Flags & GNS_NETWORK))
+        return false;
+#endif
+
+    return true;
+#else
+    return false;
+#endif
+}
+Poco::FastMutex _mu;
+
+static bool first_frame_ready = false;
+
+void bgui::render_gui()
+{
+#if !D3D_VERSION
+    if (is_initd)
+    {
+        Poco::ScopedLock l(_mu);
         // Update mouse
         auto & io = ImGui::GetIO();
         const auto & mpos = Pop3Input::getMouseXY();
         io.MousePos.x = mpos->X;
-        io.MousePos.y = mpos->Y;
+        io.MousePos.y = mpos->Y; 
 
         // Draw pointer
-        if (is_mouse_over_gui())
+        if (bgui::is_mouse_over_gui())
             io.MouseDrawCursor = true;
         else io.MouseDrawCursor = false;
 
@@ -192,114 +240,112 @@ void draw_gui()
         io.MousePos.y *= diff_y;
 
         // Start the Dear ImGui frame
-        ImGui_ImplDX9_NewFrame();
+        if (identify_poptb_renderer() == Renderers::DIRECTX9)
+            ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
         // This enables and disabled textmode depending if the mouse is 
         // over a textbox or not.
-        if (is_keyboard_input_required() && !is_keyboard_active)
+        if (bgui::is_keyboard_input_required() && !state.main.is_keyboard_active)
         {
             Pop3Input::EnterTextMode();
-            is_keyboard_active = true;
+            state.main.is_keyboard_active = true;
             gnsi.ControlMode = GCM_INPUT;
         }
-        else if (!is_keyboard_input_required() && is_keyboard_active)
+        else if (!bgui::is_keyboard_input_required() && state.main.is_keyboard_active)
         {
             Pop3Input::ExitTextMode();
-            is_keyboard_active = false;
+            state.main.is_keyboard_active = false;
             gnsi.ControlMode = GCM_NORMAL;
         }
 
         // Draw all guis
-        draw_gui_windows(terminate);
-
-        // Rendering
+        draw_all_guis();
         ImGui::EndFrame();
 
         // Render UI
         ImGui::Render();
-        ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 
-        // We should wait until we're done rendering
-        // to decide to exit the gui.
-        if (terminate)
-        {
-            switch_mode(false);
-            terminate = false;
-            return;
-        }
+        first_frame_ready = true;
     }
 #endif
 }
 
-void draw_gui_windows(bool & terminate)
+void bgui::directx_render()
 {
-    // Windows
-    static bool window_debug_output = false;
-    static bool window_script_engine = false;
-    static bool window_script_windows = false;
-
-#if CM_USE_SCRIPT4
-    // Call all LUA OnImGuiFrame windows
-    if (window_script_windows)
-        gsi.Script3.call_back(ecallback::OnImGuiFrame, {});
-#endif
-
-    if (in_new_gui)
+#if !D3D_VERSION
+    Poco::ScopedLock l(_mu);
+    if (is_initd && first_frame_ready)
     {
-        // Game Menu
-        ImGui::Begin("Menu");
-        if (ImGui::Button("Output"))
-            window_debug_output = !window_debug_output;
-
-#if CM_USE_SCRIPT4
-        if (!(gnsi.Flags & GNS_NETWORK) && ImGui::Button("Script Engine"))
-            window_script_engine = !window_script_engine;
-        if (ImGui::Button("Script Windows"))
-            window_script_windows = !window_script_windows;
-#endif
-
-        if (ImGui::Button("Exit to game"))
-        {
-            // Finish render then terminate.
-            terminate = true;
-        }
-        ImGui::End();
+        if (identify_poptb_renderer() == Renderers::DIRECTX9)
+            ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
     }
-
-    if (window_debug_output)
-    {
-        ImGui::Begin("Debug Output");
-
-        auto & debugoutput = Pop3Debug::getOutputVect();
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_HorizontalScrollbar | ImGuiInputTextFlags_ReadOnly;
-        ImGui::BeginChild("", ImVec2(ImGui::GetWindowWidth(), ImGui::GetWindowHeight() - 35.0f), false, window_flags);
-        auto s = debugoutput.size();
-        for (int i = 0; i < s; i++)
-        {
-            ImGui::TextWrapped("%02d: %s", i, debugoutput[i].c_str());
-            ImGui::SetScrollHereY();
-        }
-        ImGui::EndChild();
-        ImGui::End();
-    }
-
-#if CM_USE_SCRIPT4 
-    // Draw all LUA OnImGuiFrame windows
-    if (window_script_engine)
-        gsi.Script3.draw();
 #endif
 }
 
-void check_switch()
+void bgui::draw_all_guis()
 {
-#if !D3D_VERSION && ENABLE_NEW_GUI
-    if (should_i_switch)
+#if !D3D_VERSION
+    if (is_initd)
     {
-        if (!is_gui_active())
-            switch_mode(true);
-        should_i_switch = false;
+        render_gui_windows();
+        gsi.Script3.draw(state);
     }
 #endif
+}
+
+void bgui::draw_menu(bgui_window & window, bgui_state & state)
+{
+#if !D3D_VERSION
+    for (auto w : all_windows)
+        if (w != &window) // Dont add yourself
+            if (w->allowed_in_main_menu)
+                if (can_i_add_button_to_menu(*w))
+                    if (ImGui::Button(w->name))
+                        w->visible = true;
+#endif
+}
+
+void bgui::draw_debug_output(bgui_window & window, bgui_state & state)
+{
+#if !D3D_VERSION
+    const auto & debugoutput = Pop3Debug::getOutputVect();
+    ImGuiWindowFlags window_flags = ImGuiInputTextFlags_ReadOnly;
+    ImGui::BeginChild("", ImVec2(-1, ImGui::GetWindowHeight() - 35.0f), false, window_flags);
+    auto s = debugoutput.size();
+    for (int i = 0; i < s; i++)
+    {
+        ImGui::TextWrapped("%02d: %s", i, debugoutput[i].c_str());
+        ImGui::SetScrollHereY();
+    }
+    ImGui::EndChild();
+#endif
+}
+
+void bgui::render_gui_windows()
+{
+    for (auto w : all_windows)
+    {
+        auto & window = *w;
+        if (can_i_draw_window(window))
+        {
+            ASSERT(window.draw_function != nullptr);
+
+            ImGui::SetNextWindowSize(window.inital_size, window.condition);
+
+            if (window.position.x || window.position.y)
+                ImGui::SetNextWindowPos(window.position);
+
+            if (window.draw_predraw)
+                window.draw_predraw(window, state);
+
+            if (window.close_button)
+                ImGui::Begin(window.name, &window.visible, window.flags);
+            else ImGui::Begin(window.name, nullptr, window.flags);
+
+            window.draw_function(window, state);
+            ImGui::End();
+        }
+    }
 }

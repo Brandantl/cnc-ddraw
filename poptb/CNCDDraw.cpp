@@ -7,30 +7,29 @@ HINSTANCE hGetProcIDDLL;
 typedef D3DPRESENT_PARAMETERS*(__stdcall *getD3dp)();
 typedef LPDIRECT3D9*(__stdcall *getD3d)();
 typedef LPDIRECT3DDEVICE9*(__stdcall *getD3dDev)();
-typedef LPDIRECT3DVERTEXBUFFER9*(__stdcall *getVertexBuf)();
 typedef IDirectDrawImpl**(__stdcall *ddraw_ptr)();
 typedef RECT*(__stdcall *getWindowRect)();
-typedef void(__stdcall *poptb_callback)(void);
 typedef void(__stdcall *setPoptbCallback)(poptb_callback ptr);
-typedef poptb_renderer(__stdcall *getRenderFunc)(void);
+typedef ccdraw_renderer(__stdcall *getRenderer)();
 
 D3DPRESENT_PARAMETERS*      poptb_d3d_params;
 LPDIRECT3D9*                poptb_d3d;
 LPDIRECT3DDEVICE9*          poptb_d3d_device;
-LPDIRECT3DVERTEXBUFFER9*    poptb_d3d_vertex_buff;
 IDirectDrawImpl**           poptb_ddraw_ptr;
-poptb_renderer              render_game_plz;
 RECT*                       poptb_window_rect;
+poptb_callback              poptb_device_lost;
+ccdraw_renderer             poptb_directx_renderer;
+ccdraw_renderer             poptb_opengl_renderer;
 
 // Entry point for PopTB Draw Thread
 void _stdcall draw_callback()
 {
-    draw_gui();
+    bgui::directx_render();
 }
 
 void _stdcall device_lost()
 {
-    gui_res_changed();
+    bgui::reset_render_engine();
     Pop3Debug::trace("Device lost!");
 }
 
@@ -59,12 +58,6 @@ void setup_cnc_ddraw()
         Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getD3dDev");
     } else   poptb_d3d_device = getD3dDev_func();
 
-    auto getVertexBuf_func = (getVertexBuf)GetProcAddress(hGetProcIDDLL, "getVertexBuf");
-    if (!getVertexBuf_func)
-    {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getVertexBuf");
-    } else  poptb_d3d_vertex_buff = getVertexBuf_func();
-
     auto getDDraw_func = (ddraw_ptr)GetProcAddress(hGetProcIDDLL, "getDDraw");
     if (!getDDraw_func)
     {
@@ -77,16 +70,24 @@ void setup_cnc_ddraw()
         Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getWindowRect_func");
     }
     else poptb_window_rect = getWindowRect_func();
+
+    auto poptb_getOpenGLRenderer_func = (getRenderer)GetProcAddress(hGetProcIDDLL, "poptb_getOpenGLRenderer");
+    if (!poptb_getOpenGLRenderer_func)
+    {
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_getOpenGLRenderer");
+    }
+    else poptb_opengl_renderer = poptb_getOpenGLRenderer_func();
+
+    auto poptb_getDirectXRenderer_func = (getRenderer)GetProcAddress(hGetProcIDDLL, "poptb_getDirectXRenderer");
+    if (!poptb_getDirectXRenderer_func)
+    {
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_getDirectXRenderer");
+    }
+    else poptb_directx_renderer = poptb_getDirectXRenderer_func();
 }
 
 void init_callbacks()
 {
-    auto getRenderFunc_func = (getRenderFunc)GetProcAddress(hGetProcIDDLL, "getRenderFunc");
-    if (!getRenderFunc_func)
-    {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getRenderFunc");
-    } else render_game_plz = getRenderFunc_func();
-
     auto setPoptbDeviceLost_func = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "setPoptbDeviceLost");
     if (!setPoptbDeviceLost_func)
     {
@@ -99,5 +100,11 @@ void init_callbacks()
     {
         Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find setPoptbCallback");
     } else setPoptbCallback_func(&draw_callback);
+
+    auto poptb_device_lost = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "poptb_DeviceLost");
+    if (!poptb_device_lost)
+    {
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_DeviceLost");
+    }
 }
 #endif
