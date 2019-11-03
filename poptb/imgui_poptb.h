@@ -86,8 +86,8 @@ namespace PopTB_GUI
     }
 
     // Lambdas
-    auto InputScalerBox = [](const char * name, auto & param, const auto step, const auto step_fast, const int flags) constexpr
+    inline auto InputScalerBox = [](const char * name, auto & param, const auto step, const auto step_fast, const int flags) constexpr
     {
-        _Impl_InputScalerBox<decltype(param)>(name, param, step, step_fast, flags);
+        return _Impl_InputScalerBox<decltype(param)>(name, param, step, step_fast, flags);
     };
 }

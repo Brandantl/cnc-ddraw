@@ -8,11 +8,12 @@ EXPORTS
     getD3dDev                            @5
     getDDraw                             @6
     setPoptbCallback                     @7
-    setPoptbDeviceLost                   @8
     getWindowRect                        @9
-    poptb_DeviceLost                     @10
-    poptb_getOpenGLRenderer              @11
-    poptb_getDirectXRenderer             @12
+    setPoptbDx9Init                      @10
+    setPoptbDx9Deinit                    @11
+    poptb_getOpenGLRenderer              @12
+    poptb_getDirectXRenderer             @13
+    poptb_getFullscreen                  @14
     GameHandlesClose                     DATA
     NvOptimusEnablement                  DATA
     AmdPowerXpressRequestHighPerformance DATA

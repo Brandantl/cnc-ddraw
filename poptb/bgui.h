@@ -66,6 +66,8 @@ struct bgui_window
     bool                close_button;
 };
 
+extern Poco::FastMutex _render_mu;
+
 class bgui
 {
 public:
@@ -88,6 +90,7 @@ public:
 
     static void draw_menu(struct bgui_window & window, struct bgui_state & state);
     static void draw_debug_output(struct bgui_window & window, struct bgui_state & state);
+    static void draw_game_mode(struct bgui_window & window, struct bgui_state & state);
 
     static void render_gui_windows();
 

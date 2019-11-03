@@ -49,7 +49,15 @@ BOOL ChildWindowExists;
 DWORD NvOptimusEnablement = 1;
 DWORD AmdPowerXpressRequestHighPerformance = 1;
 poptb_callback poptb_callback_func = NULL;
-poptb_callback poptb_device_lost = NULL;
+poptb_callback poptb_dx9_init = NULL;
+poptb_callback poptb_dx9_deinit = NULL;
+
+enum POPTB_SW_INT_ADDR
+{
+    INT_WINDOW_ACTIVE = 0x005AEEB4
+};
+
+#define DEREF_INT(addr) (*((int*)addr))
 
 typedef DWORD(WINAPI *ccdraw_renderer)(void);
 void __stdcall setPoptbCallback(poptb_callback ptr)
@@ -57,23 +65,19 @@ void __stdcall setPoptbCallback(poptb_callback ptr)
     poptb_callback_func = ptr;
 }
 
-void __stdcall setPoptbDeviceLost(poptb_callback ptr)
+void __stdcall setPoptbDx9Init(poptb_callback ptr)
 {
-    poptb_device_lost = ptr;
+    poptb_dx9_init = ptr;
+}
+
+void __stdcall setPoptbDx9Deinit(poptb_callback ptr)
+{
+    poptb_dx9_deinit = ptr;
 }
 
 RECT* __stdcall getWindowRect()
 {
     return &WindowRect;
-}
-
-void __stdcall poptb_DeviceLost()
-{
-    if (Direct3D9Active && Direct3D9_OnDeviceLost())
-    {
-        if (!ddraw->windowed)
-            mouse_lock();
-    }
 }
 
 ccdraw_renderer __stdcall poptb_getDirectXRenderer()
@@ -86,9 +90,28 @@ ccdraw_renderer __stdcall poptb_getOpenGLRenderer()
     return &render_main;
 }
 
+poptb_callback __stdcall poptb_getFullscreen()
+{
+    return &ToggleFullscreen_impl;
+}
+
 IDirectDrawImpl** __stdcall getDDraw()
 {
     return &ddraw;
+}
+
+int Am_I_Beta()
+{
+    return poptb_callback_func != 0;
+}
+
+// 1.01 Patch, doesn't work on beta version.
+void PopTB_SetWindowActive(int state)
+{
+    if (!Am_I_Beta())
+    {
+        DEREF_INT(INT_WINDOW_ACTIVE) = state;
+    }
 }
 
 //BOOL WINAPI DllMainCRTStartup(HINSTANCE hinstDLL, DWORD dwReason, LPVOID lpvReserved)
@@ -681,6 +704,12 @@ void InitDirect3D9()
         ShowDriverWarning = TRUE;
         ddraw->renderer = render_soft_main;
     }
+
+    if (Am_I_Beta())
+    {
+        // Init main game.
+        (*poptb_dx9_init)();
+    }
 }
 
 // LastSetWindowPosTick = Workaround for a wine+gnome bug where each SetWindowPos call triggers a WA_INACTIVE message
@@ -1007,7 +1036,7 @@ HRESULT __stdcall ddraw_SetDisplayMode2(IDirectDrawImpl *This, DWORD width, DWOR
     return ddraw_SetDisplayMode(This, width, height, bpp);
 }
 
-void ToggleFullscreen()
+void __stdcall ToggleFullscreen_impl()
 {
     if (ddraw->bnetActive)
         return;
@@ -1034,6 +1063,14 @@ void ToggleFullscreen()
 
         ddraw_SetDisplayMode(ddraw, ddraw->width, ddraw->height, ddraw->bpp);
         mouse_lock();
+    }
+}
+
+void ToggleFullscreen()
+{
+    if (!Am_I_Beta())
+    {
+        ToggleFullscreen_impl();
     }
 }
 
@@ -1449,6 +1486,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             break;
         }
 
+        case WM_SETFOCUS:
+            PopTB_SetWindowActive(TRUE);
+            break;
+        case WM_KILLFOCUS:
+            PopTB_SetWindowActive(FALSE);
+            break;
+
         case WM_MOUSELEAVE:
             mouse_unlock();
             return 0;
@@ -1456,6 +1500,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         case WM_ACTIVATE:
             if (wParam == WA_ACTIVE || wParam == WA_CLICKACTIVE)
             {
+                PopTB_SetWindowActive(TRUE);
+
                 if (!ddraw->windowed)
                 {
                     if (!Direct3D9Active)
@@ -1474,6 +1520,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
             else if (wParam == WA_INACTIVE)
             {
+                PopTB_SetWindowActive(FALSE);
+
                 if (!ddraw->windowed && !ddraw->locked && ddraw->noactivateapp)
                     return 0;
 
@@ -1505,6 +1553,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     oneTime = TRUE;
                     break;
                 }
+
+                PopTB_SetWindowActive(TRUE);
 
                 return 0;
             }

@@ -99,7 +99,7 @@ DWORD WINAPI render_main(void)
         return 0;
     }
 
-    if (poptb_callback_func)
+    if (Am_I_Beta())
     {
         Render();
         return 0;
@@ -797,7 +797,7 @@ static void Renderer_Impl()
         glEnd();
     }
 
-    if (poptb_callback_func)
+    if (Am_I_Beta())
         (*poptb_callback_func)();
 
     if (ddraw->bnetActive)
@@ -839,7 +839,7 @@ static void Renderer_Impl()
         }
         else
         {
-            if (!poptb_callback_func)
+            if (!Am_I_Beta())
             {
                 tickEnd = timeGetTime();
 
@@ -866,7 +866,7 @@ static void Render()
         first_init = 0;
     }
 
-    if (poptb_callback_func)
+    if (Am_I_Beta())
     {
         Renderer_Impl();
         return;

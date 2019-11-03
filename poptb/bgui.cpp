@@ -2,12 +2,16 @@
 #include    "bgui.h"
 #include    "engine3.h"
 #include    "fenewmlt.h"
+#include    "Objedit.h"
+#include    "spredit.h"
+#include    "io.h"
 
 #if !D3D_VERSION
 #include    "CNCDDraw.h"
 #include    "imgui.h"
 #include    "imgui_impl_win32.h"
 #include    "imgui_impl_dx9.h"
+#include	"Chat.h"
 #endif
 
 enum class windows_available
@@ -21,12 +25,14 @@ struct bgui_window windows[] =
 {
     { "Main Menu",      false, nullptr,  bgui::draw_menu,           { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_Appearing,     true, true, true, true, true, false, true },
     { "Debug Ouput",    false, nullptr,  bgui::draw_debug_output,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
+    { "Game Mode",    false, nullptr,    bgui::draw_game_mode,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
     { nullptr, 0, 0, 0, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, 0, 0, 0, 0, 0, 0, 0 } // END
 };
 
 bool bgui::is_initd;
 bgui_state bgui::state;
 eastl::vector<struct bgui_window*> bgui::all_windows;
+static bool first_frame_ready = false;
 
 void bgui::add_window_array_to_vect(struct bgui_window * w)
 {
@@ -54,7 +60,11 @@ void bgui::init()
     add_window_array_to_vect(&windows[0]);
     add_window_array_to_vect(engine_draw_getWindows());
     add_window_array_to_vect(fenewmlt_getWindows());
+#if CM_USE_SCRIPT4
     add_window_array_to_vect(gsi.Script3.getWindows());
+#endif
+    add_window_array_to_vect(getObjedit_windows());
+    add_window_array_to_vect(getSpredit_windows());
     is_initd = true;
 #endif
 }
@@ -68,6 +78,7 @@ void bgui::deinit()
         ImGui_ImplDX9_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
+        all_windows.clear();
     }
 #endif
 }
@@ -154,6 +165,7 @@ void bgui::reset_render_engine()
         {
             ImGui_ImplDX9_Shutdown();
             ImGui_ImplDX9_Init((*poptb_d3d_device));
+            first_frame_ready = false;
         }
     }
 #endif
@@ -202,21 +214,23 @@ bool bgui::can_i_add_button_to_menu(const bgui_window & window)
     return false;
 #endif
 }
-Poco::FastMutex _mu;
-
-static bool first_frame_ready = false;
+Poco::FastMutex _render_mu;
 
 void bgui::render_gui()
 {
 #if !D3D_VERSION
     if (is_initd)
     {
-        Poco::ScopedLock l(_mu);
+        if (!_render_mu.tryLock(84))
+            return;
+
+        sprite_texture_manager::update();
+
         // Update mouse
         auto & io = ImGui::GetIO();
         const auto & mpos = Pop3Input::getMouseXY();
         io.MousePos.x = mpos->X;
-        io.MousePos.y = mpos->Y; 
+        io.MousePos.y = mpos->Y;
 
         // Draw pointer
         if (bgui::is_mouse_over_gui())
@@ -262,12 +276,20 @@ void bgui::render_gui()
 
         // Draw all guis
         draw_all_guis();
+
+        g_Chat.m_IsHovered = false;
+        if ((g_Chat.m_bWindowOpen) && !(gnsi.Flags3 & GNS3_INGAME_OPTIONS) && gnsi.GameMode.Mode == GM_MAIN_GAME)
+        {
+            g_Chat.Draw("Chat", &g_Chat.m_bWindowOpen);
+        }
+
         ImGui::EndFrame();
 
         // Render UI
         ImGui::Render();
 
         first_frame_ready = true;
+        _render_mu.unlock();
     }
 #endif
 }
@@ -275,11 +297,14 @@ void bgui::render_gui()
 void bgui::directx_render()
 {
 #if !D3D_VERSION
-    Poco::ScopedLock l(_mu);
     if (is_initd && first_frame_ready)
     {
         if (identify_poptb_renderer() == Renderers::DIRECTX9)
-            ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+        {
+            auto data = ImGui::GetDrawData();
+            if (data)
+                ImGui_ImplDX9_RenderDrawData(data);
+        }
     }
 #endif
 }
@@ -290,7 +315,9 @@ void bgui::draw_all_guis()
     if (is_initd)
     {
         render_gui_windows();
+#if CM_USE_SCRIPT4
         gsi.Script3.draw(state);
+#endif
     }
 #endif
 }
@@ -320,6 +347,52 @@ void bgui::draw_debug_output(bgui_window & window, bgui_state & state)
         ImGui::SetScrollHereY();
     }
     ImGui::EndChild();
+#endif
+}
+
+enum class GameModesAvail
+{
+    Invalid = 0,
+    MainMenu = GM_MAIN_MENU,
+    MainGame = GM_MAIN_GAME,
+    MapEditor = GM_EDITOR,
+    ObjectEditor = GM_OBJECT_EDITOR,
+    GaumutGen = GM_GAMUT_GENERATION,
+    NetworkI2 = GM_NETWORK_INTERFACE_2,
+    FrontEnd = GM_FRONTEND,
+    LanguageTest = GM_LANGUAGE_TEST,
+    FeNet = GM_FE_NET,
+    PlanetarySelect = GM_PLANETARY_LEVEL_SELECT,
+    KeyDeifne = GM_KEY_DEFINE_TEST,
+    Credits = GM_CREDITS,
+    SprtieEditor = GM_SPRITE_EDITOR
+};
+
+const char * gameModes[] =
+{
+    "Invalid",
+    "Main Menu",
+    "Main Game",
+    "Map Editor",
+    "Object Editor",
+    "Gamut Generation",
+    "Network Interface 2",
+    "Front End",
+    "Language Test",
+    "FE Net",
+    "Planetary Level Select",
+    "Key Define Test",
+    "Credits",
+    "Sprite Editor"
+};
+
+void bgui::draw_game_mode(struct bgui_window & window, struct bgui_state & state)
+{
+#if !D3D_VERSION
+    static GameModesAvail item_current;
+    item_current = static_cast<GameModesAvail>(gnsi.GameMode.Mode);
+    if (ImGui::Combo("Game Mode", reinterpret_cast<int*>(&item_current), gameModes, IM_ARRAYSIZE(gameModes)))
+        change_game_mode(static_cast<int>(item_current));
 #endif
 }
 

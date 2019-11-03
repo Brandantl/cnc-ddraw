@@ -87,8 +87,6 @@ BOOL Direct3D9_Create()
                         &D3dpp,
                         &D3dDev)))
                 {
-                    if (poptb_device_lost)
-                        (*poptb_device_lost)();
                     return D3dDev && CreateResources() && SetStates();
                 }
             }
@@ -101,9 +99,6 @@ BOOL Direct3D9_OnDeviceLost()
 {
     if (D3dDev && IDirect3DDevice9_TestCooperativeLevel(D3dDev) == D3DERR_DEVICENOTRESET)
     {
-        if (poptb_device_lost)
-            (*poptb_device_lost)();
-
         return Direct3D9_Reset();
     }
 
@@ -125,6 +120,13 @@ BOOL Direct3D9_Reset()
 
 BOOL Direct3D9_Release()
 {
+    // Deinit main game.
+    if (Am_I_Beta())
+    {
+        (*poptb_dx9_deinit)();
+    }
+
+
     if (VertexBuf)
     {
         IDirect3DVertexBuffer9_Release(VertexBuf);
@@ -425,7 +427,7 @@ DWORD WINAPI render_graphics(void)
 
     IDirect3DDevice9_BeginScene(D3dDev);
     IDirect3DDevice9_DrawPrimitive(D3dDev, D3DPT_TRIANGLESTRIP, 0, 2);
-    if (poptb_callback_func)
+    if (Am_I_Beta())
         (*poptb_callback_func)();
     IDirect3DDevice9_EndScene(D3dDev);
 
@@ -472,7 +474,7 @@ DWORD WINAPI render_graphics(void)
         }
         else
         {
-            if (!poptb_callback_func)
+            if (!Am_I_Beta())
             {
                 tickEnd = timeGetTime();
 
@@ -486,7 +488,7 @@ DWORD WINAPI render_graphics(void)
 
 DWORD WINAPI render_d3d9_main(void)
 {
-    if (poptb_callback_func)
+    if (Am_I_Beta())
     {
         render_graphics();
         return TRUE;

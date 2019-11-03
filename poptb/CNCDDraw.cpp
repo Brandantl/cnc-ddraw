@@ -1,6 +1,7 @@
 #include "Game.h"
 #if !D3D_VERSION
 #include "CNCDDraw.h"
+#include "Texture.h"
 
 HINSTANCE hGetProcIDDLL;
 
@@ -11,15 +12,16 @@ typedef IDirectDrawImpl**(__stdcall *ddraw_ptr)();
 typedef RECT*(__stdcall *getWindowRect)();
 typedef void(__stdcall *setPoptbCallback)(poptb_callback ptr);
 typedef ccdraw_renderer(__stdcall *getRenderer)();
+typedef poptb_callback(__stdcall *fullscreen)();
 
 D3DPRESENT_PARAMETERS*      poptb_d3d_params;
 LPDIRECT3D9*                poptb_d3d;
 LPDIRECT3DDEVICE9*          poptb_d3d_device;
 IDirectDrawImpl**           poptb_ddraw_ptr;
 RECT*                       poptb_window_rect;
-poptb_callback              poptb_device_lost;
 ccdraw_renderer             poptb_directx_renderer;
 ccdraw_renderer             poptb_opengl_renderer;
+poptb_callback              poptb_getFullscreen;
 
 // Entry point for PopTB Draw Thread
 void _stdcall draw_callback()
@@ -27,10 +29,15 @@ void _stdcall draw_callback()
     bgui::directx_render();
 }
 
-void _stdcall device_lost()
+void _stdcall directx_init()
 {
-    bgui::reset_render_engine();
-    Pop3Debug::trace("Device lost!");
+    bgui::init();
+}
+
+void _stdcall directx_deinit()
+{
+    TextureManager->DeleteAll();
+    bgui::deinit();
 }
 
 void setup_cnc_ddraw()
@@ -84,27 +91,35 @@ void setup_cnc_ddraw()
         Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_getDirectXRenderer");
     }
     else poptb_directx_renderer = poptb_getDirectXRenderer_func();
+
+    auto poptb_getFullscreen_func = (fullscreen)GetProcAddress(hGetProcIDDLL, "poptb_getFullscreen");
+    if (!poptb_getFullscreen_func)
+    {
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_getFullscreen_func");
+    }
+    else poptb_getFullscreen = poptb_getFullscreen_func();
 }
 
 void init_callbacks()
 {
-    auto setPoptbDeviceLost_func = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "setPoptbDeviceLost");
-    if (!setPoptbDeviceLost_func)
-    {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find setPoptbDeviceLost_func");
-    }
-    else setPoptbDeviceLost_func(&device_lost);
-
     auto setPoptbCallback_func = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "setPoptbCallback");
     if (!setPoptbCallback_func)
     {
         Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find setPoptbCallback");
     } else setPoptbCallback_func(&draw_callback);
 
-    auto poptb_device_lost = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "poptb_DeviceLost");
-    if (!poptb_device_lost)
+    auto setPoptbDx9Init_func = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "setPoptbDx9Init");
+    if (!setPoptbDx9Init_func)
     {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find poptb_DeviceLost");
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find setPoptbDx9Init");
     }
+    else setPoptbDx9Init_func(&directx_init);
+
+    auto setPoptbDx9Deinit_func = (setPoptbCallback)GetProcAddress(hGetProcIDDLL, "setPoptbDx9Deinit");
+    if (!setPoptbDx9Deinit_func)
+    {
+        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find setPoptbDx9Deinit");
+    }
+    else setPoptbDx9Deinit_func(&directx_deinit);
 }
 #endif

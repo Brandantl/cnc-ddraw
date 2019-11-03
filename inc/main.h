@@ -39,11 +39,15 @@ extern RECT WindowRect;
 extern int WindowState;
 extern BOOL ChildWindowExists;
 extern poptb_callback poptb_callback_func;
-extern poptb_callback poptb_device_lost;
+extern int Am_I_Beta();
+
+extern poptb_callback poptb_dx9_init;
+extern poptb_callback poptb_dx9_deinit;
 
 BOOL detect_cutscene();
 void LimitGameTicks();
 void ToggleFullscreen();
+void __stdcall ToggleFullscreen_impl();
 void SetWindowRect(int x, int y, int width, int height, UINT flags);
 DWORD WINAPI render_main(void);
 DWORD WINAPI render_soft_main(void);

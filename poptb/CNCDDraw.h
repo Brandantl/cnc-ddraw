@@ -143,9 +143,9 @@ extern LPDIRECT3DDEVICE9*       poptb_d3d_device;
 
 extern IDirectDrawImpl**        poptb_ddraw_ptr;
 extern RECT*                    poptb_window_rect;
-extern poptb_callback           poptb_device_lost;
 extern ccdraw_renderer          poptb_directx_renderer;
 extern ccdraw_renderer          poptb_opengl_renderer;
+extern poptb_callback           poptb_getFullscreen;
 
 inline Renderers identify_poptb_renderer()
 {
