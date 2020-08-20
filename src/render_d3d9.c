@@ -20,16 +20,6 @@ static float ScaleW;
 static float ScaleH;
 static int BitsPerPixel;
 
-D3DPRESENT_PARAMETERS* __stdcall getD3dp()
-{
-    return &D3dpp;
-}
-
-LPDIRECT3D9* getD3d()
-{
-    return &D3d;
-}
-
 LPDIRECT3DDEVICE9* __stdcall getD3dDev()
 {
     return &D3dDev;
@@ -107,13 +97,24 @@ BOOL Direct3D9_OnDeviceLost()
 
 BOOL Direct3D9_Reset()
 {
+    if (Am_I_Beta())
+    {
+        (*poptb_dx9_deinit)();
+    }
+
     D3dpp.Windowed = ddraw->windowed;
     D3dpp.BackBufferWidth = D3dpp.Windowed ? 0 : ddraw->render.width;
     D3dpp.BackBufferHeight = D3dpp.Windowed ? 0 : ddraw->render.height;
     D3dpp.BackBufferFormat = BitsPerPixel == 16 ? D3DFMT_R5G6B5 : D3DFMT_X8R8G8B8;
 
     if (D3dDev && SUCCEEDED(IDirect3DDevice9_Reset(D3dDev, &D3dpp)))
+    {
+        if (Am_I_Beta())
+        {
+            (*poptb_dx9_init)();
+        }
         return SetStates();
+    }
 
     return FALSE;
 }

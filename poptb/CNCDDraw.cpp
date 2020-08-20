@@ -14,8 +14,6 @@ typedef void(__stdcall *setPoptbCallback)(poptb_callback ptr);
 typedef ccdraw_renderer(__stdcall *getRenderer)();
 typedef poptb_callback(__stdcall *fullscreen)();
 
-D3DPRESENT_PARAMETERS*      poptb_d3d_params;
-LPDIRECT3D9*                poptb_d3d;
 LPDIRECT3DDEVICE9*          poptb_d3d_device;
 IDirectDrawImpl**           poptb_ddraw_ptr;
 RECT*                       poptb_window_rect;
@@ -46,18 +44,6 @@ void setup_cnc_ddraw()
 
     if (!hGetProcIDDLL) 
         Pop3Debug::fatalError_NoReport("Could not load DirectX Library");
-
-    auto getD3dp_func = (getD3dp)GetProcAddress(hGetProcIDDLL, "getD3dp");
-    if (!getD3dp_func)
-    {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getD3dp");
-    } else poptb_d3d_params = getD3dp_func();
-
-    auto getD3d_func = (getD3d)GetProcAddress(hGetProcIDDLL, "getD3d");
-    if (!getD3d_func)
-    {
-        Pop3Debug::fatalError_NoReport("CNC-Draw -- Could not find getD3d");
-    } else poptb_d3d = getD3d_func();
 
     auto getD3dDev_func = (getD3dDev)GetProcAddress(hGetProcIDDLL, "getD3dDev");
     if (!getD3dDev_func)

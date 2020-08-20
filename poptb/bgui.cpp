@@ -5,6 +5,18 @@
 #include    "Objedit.h"
 #include    "spredit.h"
 #include    "io.h"
+#include	"Things.h"
+#include    "Crash.h"
+#include    "Version.h"
+#include "MapEdit.h"
+#include <thread>
+
+#include "Poco/Net/HTTPResponse.h"
+#include "Poco/Net/FilePartSource.h"
+#include "Poco/Net/HTTPRequest.h"
+#include "Poco/Net/HTTPClientSession.h"
+#include "Poco/Net/HTTPBasicCredentials.h"
+#include "Poco/UnicodeConverter.h"
 
 #if !D3D_VERSION
 #include    "CNCDDraw.h"
@@ -18,15 +30,21 @@ enum class windows_available
 {
     Main_Menu,
     Debug_Ouput,
+    Game_Mode,
+    Report_Bug,
     END
 };
 
 struct bgui_window windows[] =
 {
-    { "Main Menu",      false, nullptr,  bgui::draw_menu,           { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_Appearing,     true, true, true, true, true, false, true },
-    { "Debug Ouput",    false, nullptr,  bgui::draw_debug_output,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
-    { "Game Mode",    false, nullptr,    bgui::draw_game_mode,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
-    { nullptr, 0, 0, 0, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, 0, 0, 0, 0, 0, 0, 0 } // END
+    { "Main Menu",      false, nullptr,  bgui::draw_menu, nullptr,           { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_Appearing,     true, true, true, true, true, false, true },
+    { "Debug Ouput",    false, nullptr,  bgui::draw_debug_output, nullptr,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, true, true,  true },
+    { "Game Mode",    false, nullptr,    bgui::draw_game_mode, nullptr,   { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, ImGuiCond_FirstUseEver,  true, true, true, true, false, true,  true },
+    { "Report Bug",    false, nullptr,    bgui::draw_report_window, nullptr, { gnsi.ScreenW/2.0f, gnsi.ScreenH/2.0f }, { 400.0f, 300.0f }, 0, ImGuiCond_Once,  true, true, true, true, true, true,  true },
+    { "Key Debug",    false, nullptr,    bgui::draw_input_test_window, nullptr, { 0, 0 }, { 400.0f, 300.0f }, 0, ImGuiCond_Once,  true, true, true, true, true, true,  true },
+    { "File Transfer",    false, nullptr,    bgui::draw_filetransfer_test_window, nullptr, { 0, 0 }, { 400.0f, 300.0f }, 0, ImGuiCond_Once,  true, true, true, true, true, true,  true },
+
+    { nullptr, 0, 0, 0, 0, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0, 0, 0, 0, 0, 0, 0, 0 } // END
 };
 
 bool bgui::is_initd;
@@ -65,6 +83,8 @@ void bgui::init()
 #endif
     add_window_array_to_vect(getObjedit_windows());
     add_window_array_to_vect(getSpredit_windows());
+    add_window_array_to_vect(getMapEdit_windows());
+    add_window_array_to_vect(gci.Mappack.getWindows());
     is_initd = true;
 #endif
 }
@@ -177,6 +197,23 @@ void bgui::open_main_menu()
     window.visible = true;
 }
 
+void bgui::open_report_window()
+{
+    auto & window = windows[(int)windows_available::Report_Bug];
+    window.visible = true;
+}
+
+bool bgui::is_report_window_open()
+{
+    auto & window = windows[(int)windows_available::Report_Bug];
+    return window.visible;
+}
+
+char * bgui::get_report_window_text_ptr()
+{
+    return &state.main.report_msg[0];
+}
+
 bool bgui::can_i_draw_window(const bgui_window & window)
 {
 #if !D3D_VERSION
@@ -237,15 +274,24 @@ void bgui::render_gui()
             io.MouseDrawCursor = true;
         else io.MouseDrawCursor = false;
 
-        // Screen resolution X
-        if (poptb_window_rect->right)
+        // Boarderless mode
+        if ((*poptb_ddraw_ptr)->windowed && (*poptb_ddraw_ptr)->border)
+        {
+            io.DisplaySize.x = (*poptb_ddraw_ptr)->render.width;
+            io.DisplaySize.y = (*poptb_ddraw_ptr)->render.height;
+        }
+        // Window mode
+        else if ((*poptb_ddraw_ptr)->windowed)
+        {
             io.DisplaySize.x = poptb_window_rect->right;
-        else io.DisplaySize.x = gnsi.ScreenW;
-
-        // Screen resolution Y
-        if (poptb_window_rect->bottom)
             io.DisplaySize.y = poptb_window_rect->bottom;
-        else io.DisplaySize.y = gnsi.ScreenH;
+        } 
+        // Fulscreen
+        else 
+        {
+             io.DisplaySize.x = gnsi.ScreenW;
+             io.DisplaySize.y = gnsi.ScreenH;
+        }
 
         // Adjust mouse with respect to resolution window
         auto diff_x = static_cast<float>(io.DisplaySize.x) / gnsi.ScreenW;
@@ -315,6 +361,7 @@ void bgui::draw_all_guis()
     if (is_initd)
     {
         render_gui_windows();
+        gnsi.TDebug.draw_all();
 #if CM_USE_SCRIPT4
         gsi.Script3.draw(state);
 #endif
@@ -396,6 +443,179 @@ void bgui::draw_game_mode(struct bgui_window & window, struct bgui_state & state
 #endif
 }
 
+enum class send_status
+{
+    IDLE,
+    SENDING,
+    COMPLETE,
+    FAILED
+};
+
+void bgui::draw_report_window(bgui_window & window, bgui_state & state)
+{
+    static send_status status = send_status::IDLE;
+    static auto send_report = [&]()
+    {
+        status = send_status::SENDING;
+        try
+        {
+            auto crash_dump_zip = getAbsoultePath(CRASH_FILENAME, "wb");
+            std::ofstream out = std::ofstream(crash_dump_zip, std::ios::binary | std::ios::trunc);
+            if (out.is_open())
+            {
+                Poco::Zip::Compress c(out, true);
+                auto game_gsi_path = getAbsoultePath("Save//gsi-dump.dat", "wb");
+                Poco::Path crash_gsi_file(game_gsi_path);
+                c.addFile(crash_gsi_file, crash_gsi_file.getFileName());
+                c.close();
+                out.close();
+
+                Poco::URI uri(REPORTING_SERVER);
+                Poco::Net::HTTPClientSession client_session(uri.getHost(), uri.getPort());
+                client_session.setKeepAlive(true);
+
+                // Prepare and send request
+                std::string path(uri.getPathAndQuery());
+                //Poco::Net::HTTPBasicCredentials cred(SERVER_USERNAME, SERVER_PASSWORD);
+                Poco::Net::HTTPRequest req(Poco::Net::HTTPRequest::HTTP_POST, path, Poco::Net::HTTPMessage::HTTP_1_1);
+                Poco::Net::HTTPResponse response;
+                req.setKeepAlive(true); // notice setKeepAlive is also called on session (above)
+
+                Poco::Net::HTMLForm form;
+                form.setEncoding(Poco::Net::HTMLForm::ENCODING_MULTIPART);
+                form.set("subject", "Bug Report! - " + Poco::NumberFormatter::format(BUILD_NUMBER) + " - " + Poco::NumberFormatter::format(gsi.Seed));
+                form.set("body", state.main.report_msg);
+                form.set("build-number", Poco::NumberFormatter::format(BUILD_NUMBER));
+                form.set("seed", Poco::NumberFormatter::format(gsi.Seed));
+                form.addPart("zip", new Poco::Net::FilePartSource(crash_dump_zip));
+                form.set("bug-report", "true");
+                form.prepareSubmit(req);
+                std::ostream& send = client_session.sendRequest(req);
+                form.write(send);
+
+                // get response  
+                client_session.receiveResponse(response);
+
+                auto ret = response.getStatus();
+                Poco::File(crash_gsi_file).remove();
+
+                if (ret != Poco::Net::HTTPResponse::HTTPStatus::HTTP_OK)
+                {
+                    status = send_status::FAILED;
+                } else status = send_status::COMPLETE;
+            }
+        }
+        catch (...)
+        {
+            status = send_status::FAILED;
+        }
+    };
+
+    switch (status)
+    {
+    case send_status::IDLE:
+        if (status == send_status::IDLE)
+        {
+            ImGui::Text("Explain the issue in detail (%d characters max)", MAX_NUM_REPORT_CHARS);
+            ImGui::InputTextMultiline("", &state.main.report_msg[0], MAX_NUM_REPORT_CHARS, { -1, ImGui::GetWindowHeight() - 80.0f }, ImGuiInputTextFlags_None);
+            if (ImGui::Button("Send Report"))
+            {
+                gci.SS.saveToDisk();
+                std::thread send_thread(send_report);
+                send_thread.detach();
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted("This may cause the game to briefly freeze.");
+        }
+        break;
+    case send_status::SENDING:
+        ImGui::TextUnformatted("Sending report...");
+        break;
+    case send_status::COMPLETE:
+        window.visible = false;
+        memset(&state.main.report_msg, 0, MAX_NUM_REPORT_CHARS);
+        status = send_status::IDLE;
+        break;
+    case send_status::FAILED:
+        status = send_status::IDLE;
+        break;
+    }
+}
+
+void bgui::draw_input_test_window(bgui_window & window, bgui_state & state)
+{
+    const auto & key_state = Pop3Input::getState();
+
+    for (int key = 0; key < MAX_KEYS; key++)
+    {
+        if (key_state[key])
+        {
+            ImGui::Text("Key %d is down", key);
+        }
+    }
+}
+
+const char * status_strs[] =
+{
+        "Ready",
+        "Host_Waiting_On_Client_Ack",
+        "Host_Waiting_On_Client_To_Finish_Resend_Requests",
+        "Host_Transfering_Data",
+        "Host_Waiting_On_Client_Resend_Complete",
+        "Host_Waiting_On_Client_To_Finish_Transfer",
+        "Client_Sending_Resend_Requests",
+        "Client_Waiting_On_Host_To_Start_Sending_File_Parts",
+        "Client_Waiting_On_Host_Parts_To_Finish",
+        "Transfer_Complete"
+};
+
+void bgui::draw_filetransfer_test_window(bgui_window & window, bgui_state & state)
+{
+    if (prnet)
+    {
+        unsigned int idx = static_cast<unsigned int>(prnet->getFileTransferStatus());
+        ImGui::Text("Status: %s", status_strs[idx]);
+        if (prnet->am_i_host())
+        {
+            if (ImGui::Button("Transfer"))
+            {
+                // Load a real file.
+                Poco::Path path = Poco::Path::home();
+                path.pushDirectory(GAME_DIRECTORY_MAIN);
+                path.pushDirectory(GAME_DIRECTORY_MAPPACKS);
+
+                auto file_path = path.toString() + "\\SampleMod.zip";
+
+                // Load file
+                std::ifstream f(file_path, std::ios::binary | std::ios::ate);
+                auto fsize = f.tellg();
+                f.seekg(std::ios::beg);
+
+                char* data = new char[fsize];
+                f.read(data, fsize);
+                f.close();
+
+                // Lets do a file transfer.
+                prnet->transfer_file(NET_ALLPLAYERS, "SampleMod.zip", data, fsize);
+
+                delete[] data;
+            }
+        }
+        else
+        {
+            auto total_size = prnet->getFileTransferTotalBytes();
+            auto recieved_bytes = prnet->getFileTransferRecievedBytes();
+            auto percent = prnet->getFileTransferPercent();
+            auto filename = prnet->getFileTransferName();
+
+            ImGui::Text("File Name: %s", filename.c_str());
+            ImGui::Text("Transfer: %d / %d bytes (%d%%)", recieved_bytes, total_size, percent);
+        }
+        ImGui::Text("Wait Time %d", prnet->getFileTransferSleepTimer());
+    }
+    else ImGui::Text("No Network Subsystem Detected!");
+}
+
 void bgui::render_gui_windows()
 {
     for (auto w : all_windows)
@@ -419,6 +639,9 @@ void bgui::render_gui_windows()
 
             window.draw_function(window, state);
             ImGui::End();
+
+            if (!window.visible && window.close_function)
+                window.close_function(window, state);
         }
     }
 }

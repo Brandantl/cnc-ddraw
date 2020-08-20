@@ -4,6 +4,7 @@
 typedef eastl::function<void(struct bgui_window & window, struct bgui_state & state)> bgui_callback;
 
 #define MAX_FILEPATH_LENGTH 200
+#define MAX_NUM_REPORT_CHARS 1000
 
 struct bgui_state_script4
 {
@@ -12,10 +13,7 @@ struct bgui_state_script4
                                 add_script_get_filepath(false),
                                 add_script_get_filepath_no_load(false),
                                 filename(new char[POP3NETWORK_MAX_PLAYER_NAME_LENGTH] {}),
-                                filepath(new char[MAX_FILEPATH_LENGTH] {}) ,
-                                script_buff_size(0),
-                                script_memory_size(0),
-                                script_memory(new char[script_memory_size] {}) {}
+                                filepath(new char[MAX_FILEPATH_LENGTH] {}) {}
 
     const char*                 current_script_sel;
     bool                        script4_lua_windows_visible;
@@ -23,9 +21,7 @@ struct bgui_state_script4
     bool                        add_script_get_filepath_no_load;
     eastl::unique_ptr<char[]>   filename;
     eastl::unique_ptr<char[]>   filepath;
-    size_t                      script_buff_size;
-    size_t                      script_memory_size;
-    eastl::unique_ptr<char[]>   script_memory;
+    eastl::string               script_memory;
 };
 
 struct bgui_state_main
@@ -33,6 +29,7 @@ struct bgui_state_main
     bgui_state_main() : is_keyboard_active(false) {}
 
     bool is_keyboard_active;
+    char report_msg[MAX_NUM_REPORT_CHARS]{};
 };
 
 struct bgui_state
@@ -53,6 +50,7 @@ struct bgui_window
     bool                visible; 
     bgui_callback       draw_predraw;
     bgui_callback       draw_function;
+    bgui_callback       close_function;
     ImVec2              position;
     ImVec2              inital_size;
     ImGuiWindowFlags    flags;
@@ -84,6 +82,9 @@ public:
     static void handle_text_input(const char c);
     static void reset_render_engine();
     static void open_main_menu();
+    static void open_report_window();
+    static bool is_report_window_open();
+    static char* get_report_window_text_ptr();
 
     static bool can_i_draw_window(const struct bgui_window & window);
     static bool can_i_add_button_to_menu(const struct bgui_window & window);
@@ -91,6 +92,9 @@ public:
     static void draw_menu(struct bgui_window & window, struct bgui_state & state);
     static void draw_debug_output(struct bgui_window & window, struct bgui_state & state);
     static void draw_game_mode(struct bgui_window & window, struct bgui_state & state);
+    static void draw_report_window(struct bgui_window & window, struct bgui_state & state);
+    static void draw_input_test_window(struct bgui_window & window, struct bgui_state & state);
+    static void draw_filetransfer_test_window(struct bgui_window & window, struct bgui_state & state);
 
     static void render_gui_windows();
 
