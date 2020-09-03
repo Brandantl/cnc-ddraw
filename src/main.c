@@ -495,7 +495,6 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 		DWORD bpp = 0;
 		DWORD flags = 99998;
 		DWORD fixedOutput = 99998;
-		int res640x480exists = 0;
 		DEVMODE m;
 		memset(&m, 0, sizeof(DEVMODE));
 		m.dmSize = sizeof(DEVMODE);
@@ -503,8 +502,6 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 		while (EnumDisplaySettings(NULL, i, &m))
 		{
 
-			res640x480exists = res640x480exists || (m.dmPelsWidth == 640 && m.dmPelsHeight == 480);
-			
 			if (refreshRate != 60 && m.dmDisplayFrequency >= 50)
 				refreshRate = m.dmDisplayFrequency;
 
@@ -524,7 +521,7 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 
 		// Populous hates if 640x480 is not available
 
-		if(!res640x480exists){
+		{
 			// inject 640x480
 
 			memset(&s, 0, sizeof(DDSURFACEDESC));
@@ -537,22 +534,19 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 			s.ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
 			s.ddpfPixelFormat.dwRGBBitCount = 8;
 
-			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
-			{
-				printf("    DDENUMRET_CANCEL returned, stopping\n");
-			}
-			else 
+			
+			if (This->bpp == 16)
 			{
 				s.ddpfPixelFormat.dwFlags = DDPF_RGB;
 				s.ddpfPixelFormat.dwRGBBitCount = 16;
 				s.ddpfPixelFormat.dwRBitMask = 0xF800;
 				s.ddpfPixelFormat.dwGBitMask = 0x07E0;
 				s.ddpfPixelFormat.dwBBitMask = 0x001F;
+			}
 
-				if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
-				{
-					printf("    DDENUMRET_CANCEL returned, stopping\n");
-				}
+			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
+			{
+				printf("    DDENUMRET_CANCEL returned, stopping\n");
 			}
 		}
 
