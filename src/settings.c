@@ -31,6 +31,11 @@ void Settings_Load()
     GetModuleFileNameA(NULL, ProcessFilePath, MAX_PATH);
     _splitpath(ProcessFilePath, NULL, NULL, ProcessFileName, NULL);
 
+    extraOpts->forcedWidth = GetInt("forceResolutionWidth", 0);
+    extraOpts->forcedHeight = GetInt("forceResolutionHeight", 0);
+    extraOpts->hardcodedResolutions = GetBool("hardcodedResolutions", FALSE);
+
+
     //load settings from ini
     ddraw->windowed = GetBool("windowed", FALSE);
     ddraw->border = GetBool("border", TRUE);
@@ -208,7 +213,17 @@ static void CreateSettingsIni()
             "\n"
             "; Stretch to custom resolution, 0 = defaults to the size game requests\n"
             "width=0\n"
-            "height=0\n"
+            "height=0\n" 
+            "\n"
+            "\n"
+            "; Force this to be the only resolution reported besides game-mandatory ones\n"
+            "If used alongside hardcodedResolutions under, it adds the resolution option instead\n"
+            "forceResolutionWidth=0\n"
+            "forceResolutionHeight=0\n"
+            "\n"
+            ";Whether to use the hardcoded resolutions as the reported resolutions to the game\n"
+            "hardcodedResolutions=false\n"
+            "\n"
             "\n"
             "; Override the width/height settings shown above and always stretch to fullscreen\n"
             "; Note: Can be combined with 'windowed=true' to get windowed-fullscreen aka borderless mode\n"

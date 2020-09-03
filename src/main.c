@@ -31,6 +31,9 @@
 #include "mouse.h"
 #include "render_d3d9.h"
 
+#define _DEBUG_X 1
+#define _DEBUG 1
+
 #define IDR_MYMENU 93
 
 BOOL screenshot(struct IDirectDrawSurfaceImpl *);
@@ -40,6 +43,8 @@ void DInput_Hook();
 void DInput_UnHook();
 
 IDirectDrawImpl *ddraw = NULL;
+IExtraOpts *extraOpts = NULL;
+
 
 RECT WindowRect = { .left = -32000,.top = -32000,.right = 0,.bottom = 0 };
 int WindowState = -1;
@@ -404,46 +409,6 @@ HRESULT __stdcall ddraw_DuplicateSurface(IDirectDrawImpl *This, LPDIRECTDRAWSURF
 	return DD_OK;
 }
 
-
-int readForceResolutionOverride(int* width, int* height)
-{
-	char ENV_force_resolution[sizeof("13840x12160")] = {0};
-
-	int lenForce = GetEnvironmentVariable("__CNCDDRAW_FORCE_RES_OVERRIDE", &ENV_force_resolution, sizeof(ENV_force_resolution));
-	
-	if(lenForce < 1)
-	{
-		return 0;
-	}
-
-	ENV_force_resolution[sizeof(ENV_force_resolution) - 1] = '\0';
-
-	char* forceHeight = strchr(ENV_force_resolution, 'x');
-	forceHeight[0] = '\0';
-	forceHeight++;
-	
-	*width = atoi(ENV_force_resolution);
-	*height = atoi(forceHeight);
-
-	printf("Resolution forcing %dx%d", *width, *height);
-
-	return 1;
-	
-}
-
-int readUseHardcodedResolutions()
-{
-
-	char ENV_use_hardcoded_resolutions[2] = {'0', '\0'};
-	int len = GetEnvironmentVariable("__CNCDDRAW_HARDCODED_RESOLUTIONS", &ENV_use_hardcoded_resolutions, sizeof(ENV_use_hardcoded_resolutions));
-
-	printf("Resolutions override: Given? %d val: %c", len, ENV_use_hardcoded_resolutions[0]);
-
-	return len > 0 && ENV_use_hardcoded_resolutions[0] == '1';
-	
-}
-
-
 HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, LPDDSURFACEDESC lpDDSurfaceDesc, LPVOID lpContext, LPDDENUMMODESCALLBACK lpEnumModesCallback)
 {
 	DWORD i = 0;
@@ -456,14 +421,11 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 		//return DDERR_UNSUPPORTED;
 	}
 
+	int forceWidth = extraOpts->forcedWidth;
+	int forceHeight = extraOpts->forcedHeight;
+	BOOL useHardcodedResolutions = extraOpts->hardcodedResolutions;
 	
-	int forceWidth = 640;
-	int forceHeight = 480;
-	int forceOverride = readForceResolutionOverride(&forceWidth, &forceHeight);
-
-	int useHardcodedResolutions = readUseHardcodedResolutions();
-	
-	if (useHardcodedResolutions || forceOverride)
+	if (useHardcodedResolutions || (forceWidth > 0 && forceHeight > 0))
 	{
 		// Some games crash when you feed them with too many resolutions...
 		// Populous (at least, with WINE) doesn't like resolutions under 640x480 and doesn't like if 640x480 is not available
@@ -489,13 +451,11 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 			{ 3840, 2160 },
 		};
 
-		int last = sizeof(resolutions) / sizeof(resolutions[0]);
+		
+		int i = (forceWidth <= 0 || forceHeight <= 0) ? 1 : 0;
+		int last = useHardcodedResolutions ? sizeof(resolutions) / sizeof(resolutions[0]) : 2;
 
-		if(forceOverride){
-			last = 2;
-		}
-
-		for (i = 0; i < last; i++)
+		for (; i < last; i++)
 		{
 			memset(&s, 0, sizeof(DDSURFACEDESC));
 			s.dwSize = sizeof(DDSURFACEDESC);
@@ -2117,6 +2077,8 @@ HRESULT WINAPI DirectDrawCreate(GUID FAR* lpGUID, LPDIRECTDRAW FAR* lplpDD, IUnk
 
 	ddraw = This;
 
+	extraOpts = (IExtraOpts *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IExtraOpts)); // <- not freed on purpose
+	
 	if (!This->real_dll)
 		This->real_dll = LoadLibrary("system32\\ddraw.dll");
 
