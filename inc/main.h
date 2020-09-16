@@ -59,6 +59,8 @@ struct IDirectDrawSurfaceImpl;
 
 extern struct IDirectDrawImpl *ddraw;
 
+extern struct IExtraOpts *extraOpts;
+
 typedef struct SpeedLimiter
 {
     DWORD ticklength;
@@ -67,6 +69,17 @@ typedef struct SpeedLimiter
     LARGE_INTEGER dueTime;
     BOOL useBltOrFlip;
 } SpeedLimiter;
+
+typedef struct IExtraOpts
+{
+    
+    DWORD forcedWidth;
+    DWORD forcedHeight;
+    BOOL hardcodedResolutions;
+
+} IExtraOpts;
+
+
 
 typedef struct IDirectDrawImpl
 {

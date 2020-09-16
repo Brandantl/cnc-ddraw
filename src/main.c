@@ -31,6 +31,9 @@
 #include "mouse.h"
 #include "render_d3d9.h"
 
+#define _DEBUG_X 1
+#define _DEBUG 1
+
 #define IDR_MYMENU 93
 
 BOOL screenshot(struct IDirectDrawSurfaceImpl *);
@@ -40,6 +43,8 @@ void DInput_Hook();
 void DInput_UnHook();
 
 IDirectDrawImpl *ddraw = NULL;
+IExtraOpts *extraOpts = NULL;
+
 
 RECT WindowRect = { .left = -32000,.top = -32000,.right = 0,.bottom = 0 };
 int WindowState = -1;
@@ -416,9 +421,72 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 		//return DDERR_UNSUPPORTED;
 	}
 
-	// Some games crash when you feed them with too many resolutions...
+	int forceWidth = extraOpts->forcedWidth;
+	int forceHeight = extraOpts->forcedHeight;
+	BOOL useHardcodedResolutions = extraOpts->hardcodedResolutions;
+	
+	if (useHardcodedResolutions || (forceWidth > 0 && forceHeight > 0))
+	{
+		// Some games crash when you feed them with too many resolutions...
+		// Populous (at least, with WINE) doesn't like resolutions under 640x480 and doesn't like if 640x480 is not available
+		SIZE resolutions[] =
+		{
+			// { 320, 200 },
+			// { 640, 400 },
+			{ forceWidth, forceHeight },
+			{ 640, 480 },
+			{ 800, 600 },
+			{ 1024, 768 },
+			{ 1280, 1024 },
+			{ 1280, 720 },
+			{ 1600, 900 },
+			{ 1920, 1080 },
+			{ 1920, 1200 },
+			{ 1920, 1440 },
+			{ 2048, 1152 },
+			{ 2048, 1536 },
+			{ 2560, 1600 },
+			{ 2560, 1920 },
+			{ 2560, 2048 },
+			{ 3840, 2160 },
+		};
 
-	if (TRUE)
+		
+		int i = (forceWidth <= 0 || forceHeight <= 0) ? 1 : 0;
+		int last = useHardcodedResolutions ? sizeof(resolutions) / sizeof(resolutions[0]) : 2;
+
+		for (; i < last; i++)
+		{
+			memset(&s, 0, sizeof(DDSURFACEDESC));
+			s.dwSize = sizeof(DDSURFACEDESC);
+			s.dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PIXELFORMAT;
+			s.dwHeight = resolutions[i].cy;
+			s.dwWidth = resolutions[i].cx;
+			s.dwRefreshRate = 60;
+			s.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
+			s.ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
+			s.ddpfPixelFormat.dwRGBBitCount = 8;
+
+			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
+			{
+				printf("    DDENUMRET_CANCEL returned, stopping\n");
+				break;
+			}
+
+			s.ddpfPixelFormat.dwFlags = DDPF_RGB;
+			s.ddpfPixelFormat.dwRGBBitCount = 16;
+			s.ddpfPixelFormat.dwRBitMask = 0xF800;
+			s.ddpfPixelFormat.dwGBitMask = 0x07E0;
+			s.ddpfPixelFormat.dwBBitMask = 0x001F;
+
+			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
+			{
+				printf("    DDENUMRET_CANCEL returned, stopping\n");
+				break;
+			}
+		}
+	}
+	else
 	{
 		printf("    This->bpp=%d\n", This->bpp);
 
@@ -433,6 +501,7 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 
 		while (EnumDisplaySettings(NULL, i, &m))
 		{
+
 			if (refreshRate != 60 && m.dmDisplayFrequency >= 50)
 				refreshRate = m.dmDisplayFrequency;
 
@@ -450,19 +519,73 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 			i++;
 		}
 
+		// Populous hates if 640x480 is not available
+
+		{
+			// inject 640x480
+
+			memset(&s, 0, sizeof(DDSURFACEDESC));
+			s.dwSize = sizeof(DDSURFACEDESC);
+			s.dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PIXELFORMAT;
+			s.dwWidth = 640;
+			s.dwHeight = 480;
+			s.dwRefreshRate = 60;
+			s.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
+			s.ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
+			s.ddpfPixelFormat.dwRGBBitCount = 8;
+
+			
+			if (This->bpp == 16)
+			{
+				s.ddpfPixelFormat.dwFlags = DDPF_RGB;
+				s.ddpfPixelFormat.dwRGBBitCount = 16;
+				s.ddpfPixelFormat.dwRBitMask = 0xF800;
+				s.ddpfPixelFormat.dwGBitMask = 0x07E0;
+				s.ddpfPixelFormat.dwBBitMask = 0x001F;
+			}
+
+			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
+			{
+				printf("    DDENUMRET_CANCEL returned, stopping\n");
+			}
+		}
+
+		DWORD lastDwHeight = -1;
+		DWORD lastDwWidth = -1;
+
 		memset(&m, 0, sizeof(DEVMODE));
 		m.dmSize = sizeof(DEVMODE);
 		i = 0;
 		while (EnumDisplaySettings(NULL, i, &m))
 		{
-			if (refreshRate == m.dmDisplayFrequency &&
-				bpp == m.dmBitsPerPel &&
-				flags == m.dmDisplayFlags &&
-				fixedOutput == m.dmDisplayFixedOutput)
+			if (
+				(
+					// Populous can't handle resolutions under this properly
+					m.dmPelsWidth >= 640 || 
+					m.dmPelsHeight >= 480
+				) 
+				&&
+				(
+					// Attempt to prevent repeated resolutions
+					lastDwWidth != m.dmPelsWidth ||
+					lastDwHeight != m.dmPelsHeight
+				)
+				&&
+				(
+					refreshRate == m.dmDisplayFrequency &&
+					bpp == m.dmBitsPerPel &&
+					flags == m.dmDisplayFlags &&
+					fixedOutput == m.dmDisplayFixedOutput
+				)
+			)
 			{
+				lastDwWidth = m.dmPelsWidth;
+				lastDwHeight = m.dmPelsHeight;
+				
 #if _DEBUG_X
 				printf("  %d: %dx%d@%d %d bpp\n", (int)i, (int)m.dmPelsWidth, (int)m.dmPelsHeight, (int)m.dmDisplayFrequency, (int)m.dmBitsPerPel);
 #endif
+
 				memset(&s, 0, sizeof(DDSURFACEDESC));
 				s.dwSize = sizeof(DDSURFACEDESC);
 				s.dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PIXELFORMAT;
@@ -493,59 +616,7 @@ HRESULT __stdcall ddraw_EnumDisplayModes(IDirectDrawImpl *This, DWORD dwFlags, L
 			m.dmSize = sizeof(DEVMODE);
 			i++;
 		}
-	}
-	else
-	{
-		SIZE resolutions[] =
-		{
-			{ 320, 200 },
-			{ 640, 400 },
-			{ 640, 480 },
-			{ 800, 600 },
-			{ 1024, 768 },
-			{ 1280, 1024 },
-			{ 1280, 720 },
-			{ 1920, 1080 },
-			{ 1920, 1200 },
-			{ 1920, 1440 },
-			{ 2048, 1152 },
-			{ 2048, 1536 },
-			{ 2560, 1600 },
-			{ 2560, 1920 },
-			{ 2560, 2048 },
-			{ 3840, 2160 },
-		};
 
-		for (i = 0; i < sizeof(resolutions) / sizeof(resolutions[0]); i++)
-		{
-			memset(&s, 0, sizeof(DDSURFACEDESC));
-			s.dwSize = sizeof(DDSURFACEDESC);
-			s.dwFlags = DDSD_HEIGHT | DDSD_REFRESHRATE | DDSD_WIDTH | DDSD_PIXELFORMAT;
-			s.dwHeight = resolutions[i].cy;
-			s.dwWidth = resolutions[i].cx;
-			s.dwRefreshRate = 60;
-			s.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
-			s.ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
-			s.ddpfPixelFormat.dwRGBBitCount = 8;
-
-			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
-			{
-				printf("    DDENUMRET_CANCEL returned, stopping\n");
-				break;
-			}
-
-			s.ddpfPixelFormat.dwFlags = DDPF_RGB;
-			s.ddpfPixelFormat.dwRGBBitCount = 16;
-			s.ddpfPixelFormat.dwRBitMask = 0xF800;
-			s.ddpfPixelFormat.dwGBitMask = 0x07E0;
-			s.ddpfPixelFormat.dwBBitMask = 0x001F;
-
-			if (lpEnumModesCallback(&s, lpContext) == DDENUMRET_CANCEL)
-			{
-				printf("    DDENUMRET_CANCEL returned, stopping\n");
-				break;
-			}
-		}
 	}
 
 	return DD_OK;
@@ -2000,6 +2071,8 @@ HRESULT WINAPI DirectDrawCreate(GUID FAR* lpGUID, LPDIRECTDRAW FAR* lplpDD, IUnk
 
 	ddraw = This;
 
+	extraOpts = (IExtraOpts *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IExtraOpts)); // <- not freed on purpose
+	
 	if (!This->real_dll)
 		This->real_dll = LoadLibrary("system32\\ddraw.dll");
 
